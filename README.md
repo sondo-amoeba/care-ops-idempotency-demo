@@ -12,7 +12,7 @@ Public runnable lab for **replay-safe care-ops SMS** — inspired by private HIP
 
 Clinical care-ops programs send two-way SMS around voice visits (confirmations, scheduling, follow-ups). Twilio webhooks, queue workers, and human retries all replay the same events. Without idempotent write paths, duplicate texts erode patient trust — in healthcare, a second “your appointment is tomorrow” message is a program failure, not a nuisance.
 
-Production code was private. This repo shows the **invariants and architecture** I shipped against: unified interaction threads, inbound SID upserts, outbound idempotency keys, update-only status callbacks, eligibility gates, and orchestrator-style agent triggers.
+Production code was private. This repo shows the **invariants and architecture** I shipped against: unified interaction threads, inbound SID upserts, outbound idempotency keys, update-only status callbacks, eligibility gates, orchestrator-style agent triggers, and an **agentic outbound coordinator** (LangGraph + human approval + idempotent execute).
 
 ## What I built
 
@@ -24,41 +24,53 @@ Production code was private. This repo shows the **invariants and architecture**
 | **Status callbacks** | Update-only — no new rows on late delivery events; **Simulate delivery callback** in UI |
 | **Eligibility gates** | `canContact()` before outbound send; scheduling rule gates inbound YES → confirm |
 | **Inbound orchestration** | Patient replies YES → booking confirmed, voice completed, thread resolved |
-| **Agent workflow API** | Orchestrator trigger reuses the same outbound path as care-agent send |
+| **Agent workflow API** | Deterministic orchestrator trigger reuses the same outbound path as care-agent send |
+| **AI outbound coordinator** | LangGraph graph + Postgres checkpointer + approval gate; mock/live model adapters |
+| **Inbound intent router** | Classifies reschedule/confirm/opt-out; routes to HITL proposal or `confirmFromInbound` |
+| **RAG policy retrieval** | pgvector chunks surfaced in coordinator trace (`retrieve_care_context`) |
 | **Replay storm** | 50 identical triggers → 1 outbound row (UI button + shell script + Vitest) |
-| **Care-agent UI** | Next.js console — create thread, send, replay, storm, toggle rules, activity log |
+| **Care-agent UI** | Next.js console + **AI Coordinator pane** (trace SSE, approve/reject, lifecycle trigger) |
 
-**Stack:** NestJS · TypeORM · PostgreSQL · Redis · Next.js · Tailwind
+**Stack:** NestJS · TypeORM · PostgreSQL (pgvector) · Redis · LangGraph · Next.js · Tailwind
 
 ## Architecture
 
 ```
 Browser
-  → Next.js (Vercel) — Care Agent Console
-       ↓ rewrites /care-ops/* and /webhooks/*
+  → Next.js (Vercel) — Care Agent Console + AI Coordinator pane
+       ↓ runtime proxy /care-ops/* and /webhooks/*
   → NestJS API (Render free)
        ↓
-  PostgreSQL (Neon / Vercel Postgres)     Redis (Upstash)
+  PostgreSQL (Neon) + pgvector          Redis (Upstash)
        │                                        │
-  interactions · care_threads · bookings       rate limits
-  sms_messages · sms_outbox · eligibility_rules
+  interactions · sms_outbox · coordinator_*    rate limits
+  care_context_chunks · LangGraph checkpoints
 ```
 
-**Inbound path:** `POST /webhooks/twilio/inbound` → upsert message by SID → optional YES orchestration  
+**Inbound path:** `POST /webhooks/twilio/inbound` → SID upsert → supervisor → inbound router (intent)  
 **Outbound path:** eligibility → rate limit → outbox insert (conflict-safe) → message row  
-**Agent path:** `POST /care-ops/agent-workflow/trigger-sms` → same outbound module as care-agent send
+**Coordinator path:** LangGraph observe → RAG → plan → propose → **HITL approve** → idempotent execute  
+**Legacy agent path:** `POST /care-ops/agent-workflow/trigger-sms` → same outbound module (non-LLM)
 
-See [docs/adr/](./docs/adr/) for decision records (outbox dedupe, inbound SID upsert, split-stack deploy).
+See [docs/adr/](./docs/adr/) for decision records (outbox dedupe, inbound SID upsert, split-stack deploy, coordinator graph, multi-agent + RAG).
 
 ## Demo walkthrough (5 minutes)
 
+### Tier 1 — Idempotency + agentic outbound (interview default)
+
 1. Open the live URL (or local UI at http://localhost:3000).
 2. **New care thread** — creates interaction + thread + voice + booking bundle.
-3. **Care-agent send** — one outbound message (status `queued`).
-4. **Simulate delivery callback** — same row updates to `delivered` (no duplicate insert).
-5. **Replay inbound webhook** — twice with same SID → second call blocked; badges move to confirmed/completed/resolved.
-6. **50× replay storm** — activity log shows 49 duplicates blocked, metrics show 1 outbound row.
-7. **Disable outbound eligibility** — send fails with `403`; re-enable and retry.
+3. **Run AI coordinator** (right pane) — trace fills; proposal appears (`awaiting_approval`).
+4. **Approve** — one outbound SMS via `ai_coordinator` source (idempotent outbox).
+5. **50× replay storm** — activity log shows duplicates blocked; metrics show 1 outbound row.
+
+### Tier 2 — Full stack (stretch)
+
+6. **Simulate visit ended** — lifecycle signal auto-starts coordinator run.
+7. **Replay inbound webhook** — YES → badges move to confirmed/completed/resolved.
+8. Change inbound body to `"can we move to Thursday?"` → inbound router proposes reschedule (HITL).
+9. **Simulate delivery callback** — same row updates to `delivered` (no duplicate insert).
+10. **Disable outbound eligibility** — coordinator run → `ineligible`; re-enable and retry.
 
 ## Local setup
 
@@ -96,7 +108,9 @@ pnpm test
 bash scripts/replay-storm.sh
 ```
 
-Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, YES confirmation orchestration, and 100× agent-workflow storm.
+Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, YES confirmation orchestration, 100× agent-workflow storm, **coordinator graph + HITL**, inbound intent routing, and RAG trace events (18 tests).
+
+Set `COORDINATOR_MODEL_MODE=mock` (default when no `OPENAI_API_KEY`) for deterministic CI. Optional `OPENAI_API_KEY` on Render enables live LLM planning.
 
 ## CI/CD
 
@@ -129,8 +143,15 @@ docker compose up --build
 | POST | `/care-ops/interactions` | Create thread bundle |
 | GET | `/care-ops/interactions` | List recent interactions |
 | GET | `/care-ops/interactions/:id` | Thread detail + messages |
+| POST | `/care-ops/interactions/:id/lifecycle/voice-completed` | Voice completed + coordinator run |
 | POST | `/care-ops/sms/send` | Care-agent outbound |
-| POST | `/care-ops/agent-workflow/trigger-sms` | Orchestrator trigger |
+| POST | `/care-ops/agent-workflow/trigger-sms` | Deterministic orchestrator trigger |
+| POST | `/care-ops/coordinator/runs` | Start AI coordinator run |
+| GET | `/care-ops/coordinator/runs/:id` | Run detail + checkpoint status |
+| GET | `/care-ops/coordinator/runs/:id/trace` | Coordinator trace events |
+| GET | `/care-ops/coordinator/runs/:id/stream` | SSE trace stream |
+| POST | `/care-ops/coordinator/runs/:id/approve` | HITL approve → idempotent send |
+| POST | `/care-ops/coordinator/runs/:id/reject` | HITL reject |
 | POST | `/webhooks/twilio/inbound` | Simulated inbound webhook |
 | POST | `/webhooks/twilio/status` | Delivery status callback |
 | GET/POST | `/care-ops/eligibility/rules` | List / toggle rules |
@@ -197,7 +218,7 @@ Reviewers hit one URL; Next.js rewrites proxy `/care-ops/*` and `/webhooks/*` to
 
 ### 5. Verify
 
-Open https://care-ops-idempotency-demo.vercel.app → **New care thread** → **50× replay storm**.
+Open https://care-ops-idempotency-demo.vercel.app → **New care thread** → **Run AI coordinator** → **Approve** → **50× replay storm**.
 
 ### Post-deploy
 
@@ -210,6 +231,8 @@ Keep-warm runs automatically on `main`. Disable it in Render dashboard if you su
 - Eligibility is program-level (not per-patient opt-out table)
 - NestJS monolith module layout (domain modules deferred)
 - `synchronize: true` for demo schema — use migrations in production
+- Coordinator uses **mock model** in CI and by default on Render (set `OPENAI_API_KEY` for live LLM)
+- LangGraph + pgvector require Neon Postgres with `vector` extension enabled
 - Sanitized fake Twilio SIDs — not a Twilio integration test
 
 ## Disclaimer

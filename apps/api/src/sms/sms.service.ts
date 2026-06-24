@@ -7,7 +7,6 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
-import { isConfirmationBody } from "../common/confirmation.util";
 import {
   buildIdempotencyKey,
   fakeTwilioSid,
@@ -24,7 +23,7 @@ export interface SendSmsInput {
   programId: string;
   templateId: string;
   body: string;
-  source: "care_agent" | "agent_workflow";
+  source: "care_agent" | "agent_workflow" | "ai_coordinator";
   windowStart?: string;
 }
 
@@ -75,21 +74,7 @@ export class SmsService {
       }),
     );
 
-    let confirmed = false;
-    if (isConfirmationBody(payload.Body)) {
-      const scheduling = await this.eligibility.canContact(
-        interaction.patientId,
-        interaction.programId,
-        "sms",
-        "scheduling",
-      );
-      if (scheduling.allowed) {
-        await this.interactions.confirmFromInbound(payload.interactionId);
-        confirmed = true;
-      }
-    }
-
-    return { message, duplicate: false, confirmed };
+    return { message, duplicate: false };
   }
 
   async handleStatusCallback(payload: {

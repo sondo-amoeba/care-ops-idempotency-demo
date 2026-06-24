@@ -7,6 +7,7 @@ import {
   type InteractionSummary,
   type ThreadDetail,
 } from "@/lib/api";
+import { CoordinatorPane } from "@/components/CoordinatorPane";
 
 const DEFAULT_PROGRAM = "behavioral-health-outreach";
 
@@ -214,7 +215,8 @@ export default function CareAgentConsole() {
           {!thread ? (
             <p className="text-sm text-slate-500">Select or create an interaction.</p>
           ) : (
-            <>
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="space-y-4">
               <div className="flex flex-wrap gap-2 text-xs">
                 <span className="badge-blue">thread: {thread.careThread?.status}</span>
                 <span className="badge-amber">voice: {thread.voiceSession?.status}</span>
@@ -286,7 +288,15 @@ export default function CareAgentConsole() {
                   ))}
                 </ul>
               </div>
-            </>
+              </div>
+
+              <CoordinatorPane
+                interactionId={selectedId}
+                disabled={busy}
+                onLog={pushLog}
+                onRefresh={refresh}
+              />
+            </div>
           )}
         </section>
       </div>

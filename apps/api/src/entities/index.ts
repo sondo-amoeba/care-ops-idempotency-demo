@@ -5,3 +5,7 @@ export * from "./booking.entity";
 export * from "./sms-message.entity";
 export * from "./sms-outbox.entity";
 export * from "./eligibility-rule.entity";
+export * from "./coordinator-run.entity";
+export * from "./coordinator-proposal.entity";
+export * from "./coordinator-trace-event.entity";
+export * from "./care-context-chunk.entity";

@@ -58,6 +58,40 @@ export type SendSmsResult = {
 export type InboundResult = {
   duplicate: boolean;
   confirmed?: boolean;
+  intent?: string;
+  coordinatorRun?: CoordinatorRun;
+};
+
+export type CoordinatorProposal = {
+  id: string;
+  runId: string;
+  interactionId: string;
+  templateId: string;
+  body: string;
+  rationale: string;
+  status: string;
+};
+
+export type CoordinatorRun = {
+  id: string;
+  interactionId: string;
+  status: string;
+  modelMode: "mock" | "live";
+  signalType: string;
+  proposal: CoordinatorProposal | null;
+  graphEngine?: "langgraph";
+  checkpointReady?: boolean;
+  resumed?: boolean;
+  ineligibleReason?: string | null;
+};
+
+export type CoordinatorTraceEvent = {
+  id: string;
+  runId: string;
+  eventType: string;
+  name: string;
+  detail?: Record<string, unknown> | null;
+  createdAt: string;
 };
 
 export type StatusCallbackResult = {
@@ -101,4 +135,32 @@ export const careOpsApi = {
     api<{ totalOutbound: number; distinctKeys: number; duplicateRate: number }>(
       "/care-ops/metrics/duplicates",
     ),
+  completeVoiceLifecycle: (interactionId: string) =>
+    api<{ voiceSession: { status: string }; coordinatorRun: CoordinatorRun }>(
+      `/care-ops/interactions/${interactionId}/lifecycle/voice-completed`,
+      { method: "POST" },
+    ),
+  startCoordinatorRun: (interactionId: string, signal: "manual" | "lifecycle" = "manual") =>
+    api<CoordinatorRun>("/care-ops/coordinator/runs", {
+      method: "POST",
+      body: JSON.stringify({ interactionId, signal }),
+    }),
+  getCoordinatorRun: (runId: string) =>
+    api<CoordinatorRun>(`/care-ops/coordinator/runs/${runId}`),
+  getCoordinatorTrace: (runId: string) =>
+    api<{ runId: string; events: CoordinatorTraceEvent[] }>(
+      `/care-ops/coordinator/runs/${runId}/trace`,
+    ),
+  approveCoordinatorRun: (runId: string, windowStart?: string) =>
+    api<CoordinatorRun & { sendResult?: SendSmsResult }>(
+      `/care-ops/coordinator/runs/${runId}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify(windowStart ? { windowStart } : {}),
+      },
+    ),
+  rejectCoordinatorRun: (runId: string) =>
+    api<CoordinatorRun>(`/care-ops/coordinator/runs/${runId}/reject`, {
+      method: "POST",
+    }),
 };

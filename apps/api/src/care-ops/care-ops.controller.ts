@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Inject, Param, Post } from "@nestjs/common";
 import { IsBoolean, IsOptional, IsString, IsUUID } from "class-validator";
+import { CoordinatorService } from "../coordinator/coordinator.service";
 import { EligibilityService } from "../eligibility/eligibility.service";
 import { InteractionService } from "../interactions/interaction.service";
 import { SmsService } from "../sms/sms.service";
@@ -70,6 +71,7 @@ export class CareOpsController {
     @Inject(InteractionService) private readonly interactions: InteractionService,
     @Inject(SmsService) private readonly sms: SmsService,
     @Inject(EligibilityService) private readonly eligibility: EligibilityService,
+    @Inject(CoordinatorService) private readonly coordinator: CoordinatorService,
   ) {}
 
   @Post("interactions")
@@ -85,6 +87,16 @@ export class CareOpsController {
   @Get("interactions/:id")
   getInteraction(@Param("id") id: string) {
     return this.interactions.getThreadDetail(id);
+  }
+
+  @Post("interactions/:id/lifecycle/voice-completed")
+  async completeVoiceLifecycle(@Param("id") id: string) {
+    const voiceSession = await this.interactions.completeVoiceSession(id);
+    const coordinatorRun = await this.coordinator.startRun({
+      interactionId: id,
+      signal: "lifecycle",
+    });
+    return { voiceSession, coordinatorRun };
   }
 
   @Post("sms/send")

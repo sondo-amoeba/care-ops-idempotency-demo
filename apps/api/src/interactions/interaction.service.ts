@@ -83,6 +83,19 @@ export class InteractionService {
     return { interaction, careThread, voiceSession, booking, messages };
   }
 
+  /** Lifecycle signal: voice visit ended (demo / orchestrator hook). */
+  async completeVoiceSession(interactionId: string) {
+    const voiceSession = await this.voiceRepo.findOne({ where: { interactionId } });
+    if (!voiceSession) {
+      throw new NotFoundException("voice_session_not_found");
+    }
+    if (voiceSession.status !== "completed") {
+      voiceSession.status = "completed";
+      await this.voiceRepo.save(voiceSession);
+    }
+    return voiceSession;
+  }
+
   /** Idempotent lifecycle transition after patient confirms via inbound SMS. */
   async confirmFromInbound(interactionId: string): Promise<void> {
     const [careThread, voiceSession, booking] = await Promise.all([
