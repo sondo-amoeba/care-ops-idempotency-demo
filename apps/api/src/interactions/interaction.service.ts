@@ -82,4 +82,26 @@ export class InteractionService {
     ]);
     return { interaction, careThread, voiceSession, booking, messages };
   }
+
+  /** Idempotent lifecycle transition after patient confirms via inbound SMS. */
+  async confirmFromInbound(interactionId: string): Promise<void> {
+    const [careThread, voiceSession, booking] = await Promise.all([
+      this.threadRepo.findOne({ where: { interactionId } }),
+      this.voiceRepo.findOne({ where: { interactionId } }),
+      this.bookingRepo.findOne({ where: { interactionId } }),
+    ]);
+
+    if (careThread && careThread.status !== "resolved") {
+      careThread.status = "resolved";
+      await this.threadRepo.save(careThread);
+    }
+    if (voiceSession && voiceSession.status !== "completed") {
+      voiceSession.status = "completed";
+      await this.voiceRepo.save(voiceSession);
+    }
+    if (booking && booking.status !== "confirmed") {
+      booking.status = "confirmed";
+      await this.bookingRepo.save(booking);
+    }
+  }
 }

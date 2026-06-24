@@ -3,16 +3,19 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
+import { isConfirmationBody } from "../common/confirmation.util";
 import {
   buildIdempotencyKey,
   fakeTwilioSid,
   hourWindowStart,
 } from "../common/idempotency.util";
 import { EligibilityService } from "../eligibility/eligibility.service";
-import { SmsMessage, SmsOutbox } from "../entities";
+import { Interaction, SmsMessage, SmsOutbox } from "../entities";
+import { InteractionService } from "../interactions/interaction.service";
 import { RedisService } from "../redis/redis.service";
 
 export interface SendSmsInput {
@@ -32,7 +35,10 @@ export class SmsService {
     private readonly messageRepo: Repository<SmsMessage>,
     @InjectRepository(SmsOutbox)
     private readonly outboxRepo: Repository<SmsOutbox>,
+    @InjectRepository(Interaction)
+    private readonly interactionRepo: Repository<Interaction>,
     @Inject(EligibilityService) private readonly eligibility: EligibilityService,
+    @Inject(InteractionService) private readonly interactions: InteractionService,
     @Inject(RedisService) private readonly redis: RedisService,
   ) {}
 
@@ -48,8 +54,16 @@ export class SmsService {
       existing.body = payload.Body;
       existing.status = "received";
       await this.messageRepo.save(existing);
-      return { message: existing, duplicate: true };
+      return { message: existing, duplicate: true, confirmed: false };
     }
+
+    const interaction = await this.interactionRepo.findOne({
+      where: { id: payload.interactionId },
+    });
+    if (!interaction) {
+      throw new NotFoundException("interaction_not_found");
+    }
+
     const message = await this.messageRepo.save(
       this.messageRepo.create({
         interactionId: payload.interactionId,
@@ -60,7 +74,22 @@ export class SmsService {
         source: "patient",
       }),
     );
-    return { message, duplicate: false };
+
+    let confirmed = false;
+    if (isConfirmationBody(payload.Body)) {
+      const scheduling = await this.eligibility.canContact(
+        interaction.patientId,
+        interaction.programId,
+        "sms",
+        "scheduling",
+      );
+      if (scheduling.allowed) {
+        await this.interactions.confirmFromInbound(payload.interactionId);
+        confirmed = true;
+      }
+    }
+
+    return { message, duplicate: false, confirmed };
   }
 
   async handleStatusCallback(payload: {
@@ -100,17 +129,7 @@ export class SmsService {
       where: { idempotencyKey },
     });
     if (existingOutbox) {
-      const existingMessage = existingOutbox.twilioMessageSid
-        ? await this.messageRepo.findOne({
-            where: { twilioMessageSid: existingOutbox.twilioMessageSid },
-          })
-        : null;
-      return {
-        duplicate: true,
-        outbox: existingOutbox,
-        message: existingMessage,
-        idempotencyKey,
-      };
+      return this.buildDuplicateSendResult(idempotencyKey);
     }
 
     const allowed = await this.redis.checkRateLimit(
@@ -123,17 +142,18 @@ export class SmsService {
     }
 
     const twilioMessageSid = fakeTwilioSid("out", idempotencyKey);
-    const outbox = await this.outboxRepo.save(
-      this.outboxRepo.create({
-        idempotencyKey,
-        interactionId: input.interactionId,
-        templateId: input.templateId,
-        body: input.body,
-        status: "sent",
-        twilioMessageSid,
-        source: input.source,
-      }),
-    );
+    const inserted = await this.tryInsertOutbox({
+      idempotencyKey,
+      interactionId: input.interactionId,
+      templateId: input.templateId,
+      body: input.body,
+      twilioMessageSid,
+      source: input.source,
+    });
+
+    if (!inserted) {
+      return this.buildDuplicateSendResult(idempotencyKey);
+    }
 
     const message = await this.messageRepo.save(
       this.messageRepo.create({
@@ -147,7 +167,60 @@ export class SmsService {
       }),
     );
 
+    const outbox = await this.outboxRepo.findOneOrFail({
+      where: { idempotencyKey },
+    });
+
     return { duplicate: false, outbox, message, idempotencyKey };
+  }
+
+  /** INSERT … ON CONFLICT DO NOTHING — safe under concurrent replay. */
+  private async tryInsertOutbox(values: {
+    idempotencyKey: string;
+    interactionId: string;
+    templateId: string;
+    body: string;
+    twilioMessageSid: string;
+    source: string;
+  }): Promise<boolean> {
+    const rows: Array<{ id: string }> = await this.outboxRepo.manager.query(
+      `
+        INSERT INTO sms_outbox
+          ("idempotencyKey", "interactionId", "templateId", body, status, "twilioMessageSid", source)
+        VALUES ($1, $2, $3, $4, 'sent', $5, $6)
+        ON CONFLICT ("idempotencyKey") DO NOTHING
+        RETURNING id
+      `,
+      [
+        values.idempotencyKey,
+        values.interactionId,
+        values.templateId,
+        values.body,
+        values.twilioMessageSid,
+        values.source,
+      ],
+    );
+    return rows.length > 0;
+  }
+
+  private async buildDuplicateSendResult(idempotencyKey: string) {
+    const existingOutbox = await this.outboxRepo.findOne({
+      where: { idempotencyKey },
+    });
+    if (!existingOutbox) {
+      throw new ConflictException("outbox_race_retry");
+    }
+    const existingMessage = existingOutbox.twilioMessageSid
+      ? await this.messageRepo.findOne({
+          where: { twilioMessageSid: existingOutbox.twilioMessageSid },
+        })
+      : null;
+    return {
+      duplicate: true,
+      outbox: existingOutbox,
+      message: existingMessage,
+      idempotencyKey,
+    };
   }
 
   async getDuplicateStats() {

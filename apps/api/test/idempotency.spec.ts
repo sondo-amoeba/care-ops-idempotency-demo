@@ -56,6 +56,36 @@ describe("Care-ops idempotency (e2e)", () => {
     expect(detail.body.messages).toHaveLength(1);
   });
 
+  it("confirms booking on first inbound YES when scheduling is enabled", async () => {
+    const created = await request(app.getHttpServer())
+      .post("/care-ops/interactions")
+      .send({ patientId: "p1b", programId: "behavioral-health-outreach" })
+      .expect(201);
+
+    const interactionId = created.body.id as string;
+    const messageSid = `SM_INBOUND_${randomUUID()}`;
+
+    const inbound = await request(app.getHttpServer())
+      .post("/webhooks/twilio/inbound")
+      .send({
+        MessageSid: messageSid,
+        Body: "YES — confirm appointment",
+        interactionId,
+      })
+      .expect(201);
+
+    expect(inbound.body.duplicate).toBe(false);
+    expect(inbound.body.confirmed).toBe(true);
+
+    const detail = await request(app.getHttpServer())
+      .get(`/care-ops/interactions/${interactionId}`)
+      .expect(200);
+
+    expect(detail.body.booking.status).toBe("confirmed");
+    expect(detail.body.voiceSession.status).toBe("completed");
+    expect(detail.body.careThread.status).toBe("resolved");
+  });
+
   it("dedupes outbound sends via idempotency_key", async () => {
     const created = await request(app.getHttpServer())
       .post("/care-ops/interactions")
@@ -85,6 +115,47 @@ describe("Care-ops idempotency (e2e)", () => {
     expect(first.body.duplicate).toBe(false);
     expect(second.body.duplicate).toBe(true);
     expect(second.body.message.id).toBe(first.body.message.id);
+  });
+
+  it("dedupes concurrent outbound sends to a single row", async () => {
+    const created = await request(app.getHttpServer())
+      .post("/care-ops/interactions")
+      .send({ patientId: "p2b", programId: "behavioral-health-outreach" })
+      .expect(201);
+
+    const interactionId = created.body.id as string;
+    const sendBody = {
+      interactionId,
+      patientId: "p2b",
+      programId: "behavioral-health-outreach",
+      templateId: "concurrent-demo",
+      body: "Concurrent replay test.",
+      windowStart: "2026-06-23T15:30:00.000Z",
+    };
+
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        request(app.getHttpServer()).post("/care-ops/sms/send").send(sendBody),
+      ),
+    );
+
+    for (const res of responses) {
+      expect(res.status).toBe(201);
+    }
+
+    const winners = responses.filter((res) => res.body.duplicate === false);
+    const blocked = responses.filter((res) => res.body.duplicate === true);
+    expect(winners).toHaveLength(1);
+    expect(blocked).toHaveLength(9);
+
+    const detail = await request(app.getHttpServer())
+      .get(`/care-ops/interactions/${interactionId}`)
+      .expect(200);
+
+    const outbound = detail.body.messages.filter(
+      (m: { direction: string }) => m.direction === "outbound",
+    );
+    expect(outbound).toHaveLength(1);
   });
 
   it("holds duplicate rate under 0.1% in replay storm", async () => {

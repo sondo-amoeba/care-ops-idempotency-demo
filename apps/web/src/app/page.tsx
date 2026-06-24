@@ -98,9 +98,35 @@ export default function CareAgentConsole() {
       };
       const first = await careOpsApi.replayInbound(payload);
       const second = await careOpsApi.replayInbound(payload);
-      pushLog(`Inbound replay #1 duplicate=${String(first.duplicate)}`);
+      pushLog(`Inbound replay #1 duplicate=${String(first.duplicate)} confirmed=${String(first.confirmed ?? false)}`);
       pushLog(`Inbound replay #2 duplicate=${String(second.duplicate)}`);
       await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function simulateDelivery() {
+    if (!thread) return;
+    const latestOutbound = [...thread.messages]
+      .reverse()
+      .find((msg) => msg.direction === "outbound");
+    if (!latestOutbound) {
+      pushLog("No outbound message to update");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await careOpsApi.updateStatus({
+        MessageSid: latestOutbound.twilioMessageSid,
+        MessageStatus: "delivered",
+      });
+      pushLog(
+        `Status callback → updated=${String(res.updated)} status=delivered sid=${latestOutbound.twilioMessageSid.slice(0, 12)}…`,
+      );
+      await refresh();
+    } catch (err) {
+      pushLog(`Status callback failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -234,6 +260,9 @@ export default function CareAgentConsole() {
               <div className="flex flex-wrap gap-2">
                 <button className="btn-secondary" disabled={busy} onClick={replayInbound}>
                   Replay inbound webhook
+                </button>
+                <button className="btn-secondary" disabled={busy} onClick={simulateDelivery}>
+                  Simulate delivery callback
                 </button>
                 <button className="btn-secondary" disabled={busy} onClick={runStorm}>
                   50× replay storm

@@ -21,12 +21,4 @@ export class RedisService implements OnModuleDestroy {
     }
     return count <= limit;
   }
-
-  async cacheGet(key: string): Promise<string | null> {
-    return this.client.get(`cache:${key}`);
-  }
-
-  async cacheSet(key: string, value: string, ttlSec: number): Promise<void> {
-    await this.client.set(`cache:${key}`, value, "EX", ttlSec);
-  }
 }

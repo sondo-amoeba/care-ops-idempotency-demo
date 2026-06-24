@@ -1,7 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-
+/** Same-origin API paths; Next.js rewrites proxy to NestJS (see next.config.mjs). */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(path, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -56,6 +55,17 @@ export type SendSmsResult = {
   message?: SmsMessage;
 };
 
+export type InboundResult = {
+  duplicate: boolean;
+  confirmed?: boolean;
+};
+
+export type StatusCallbackResult = {
+  updated: boolean;
+  reason?: string;
+  message?: SmsMessage;
+};
+
 export const careOpsApi = {
   listInteractions: () => api<InteractionSummary[]>("/care-ops/interactions"),
   createInteraction: (patientId: string, programId: string) =>
@@ -72,12 +82,12 @@ export const careOpsApi = {
       body: JSON.stringify(body),
     }),
   replayInbound: (body: Record<string, string>) =>
-    api<{ duplicate: boolean }>("/webhooks/twilio/inbound", {
+    api<InboundResult>("/webhooks/twilio/inbound", {
       method: "POST",
       body: JSON.stringify(body),
     }),
   updateStatus: (body: Record<string, string>) =>
-    api("/webhooks/twilio/status", {
+    api<StatusCallbackResult>("/webhooks/twilio/status", {
       method: "POST",
       body: JSON.stringify(body),
     }),
