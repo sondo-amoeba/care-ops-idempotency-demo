@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/care-ops/:path*",
+      "destination": "https://care-ops-api.onrender.com/care-ops/:path*"
+    },
+    {
+      "source": "/webhooks/:path*",
+      "destination": "https://care-ops-api.onrender.com/webhooks/:path*"
+    }
+  ]
+}
