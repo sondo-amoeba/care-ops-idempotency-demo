@@ -1,4 +1,4 @@
-/** Same-origin API paths; Next.js rewrites proxy to NestJS (see next.config.mjs). */
+/** Same-origin API paths; route handlers proxy to NestJS via API_PROXY_URL. */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
