@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: "standalone",
   async rewrites() {
     const apiBase = process.env.API_PROXY_URL ?? "http://localhost:3001";
     return [

@@ -2,7 +2,7 @@
 
 Public runnable lab for **replay-safe care-ops SMS** — inspired by private HIPAA-bound production work at Ellipsis Health, rebuilt so engineering reviewers can click through without cloning.
 
-**Live demo:** https://care-ops-idempotency-demo.vercel.app _(after deploy — API must be live on Railway)_
+**Live demo:** https://care-ops-idempotency-demo.vercel.app _(UI live — API requires Railway deploy + `API_PROXY_URL`)_
 
 **Repository:** https://github.com/sondo-amoeba/care-ops-idempotency-demo
 
@@ -147,16 +147,16 @@ TypeORM `synchronize: true` applies schema on first boot (demo only — not for 
 ### 4. Web on Vercel
 
 1. Import repo in Vercel (same account as Glade demo).
-2. **Root Directory:** repository root (monorepo).
-3. Environment variable:
+2. **Root Directory:** `apps/web`
+3. **Install Command:** `cd ../.. && pnpm install`
+4. **Build Command:** `pnpm build`
+5. Environment variable:
    - `API_PROXY_URL` — Railway API URL from step 3
-4. Build settings (or use root `vercel.json`):
-   - Install: `pnpm install`
-   - Build: `pnpm --filter @care-ops/web build`
-   - Output: `apps/web/.next`
-5. `vercel --prod`
+6. Deploy (`vercel --prod` or push to `main` after GitHub connect)
 
 Reviewers hit one URL; Next.js rewrites proxy `/care-ops/*` and `/webhooks/*` to the API.
+
+**Note:** Do not use Vercel's experimental NestJS service — TypeORM decorators fail on serverless. Keep the API on Railway.
 
 ### Post-deploy
 
