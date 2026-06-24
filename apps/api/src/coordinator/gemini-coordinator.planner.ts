@@ -1,10 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI, ObjectSchema, SchemaType } from "@google/generative-ai";
 import { CoordinatorPlanContext, CoordinatorProposalDraft } from "./coordinator-proposal.types";
 
 const DEFAULT_MODEL = "gemini-2.0-flash";
 
-const PROPOSAL_SCHEMA = {
+const PROPOSAL_SCHEMA: ObjectSchema = {
   type: SchemaType.OBJECT,
   properties: {
     templateId: {
@@ -21,7 +21,7 @@ const PROPOSAL_SCHEMA = {
     },
   },
   required: ["templateId", "body", "rationale"],
-} as const;
+};
 
 @Injectable()
 export class GeminiCoordinatorPlanner {
