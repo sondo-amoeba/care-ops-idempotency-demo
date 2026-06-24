@@ -1,7 +1,15 @@
 import { NextRequest } from "next/server";
 
+const PRODUCTION_API_URL = "https://care-ops-api.onrender.com";
+
 export function apiBaseUrl(): string {
-  return process.env.API_PROXY_URL ?? "http://localhost:3001";
+  if (process.env.API_PROXY_URL) {
+    return process.env.API_PROXY_URL;
+  }
+  if (process.env.VERCEL) {
+    return PRODUCTION_API_URL;
+  }
+  return "http://localhost:3001";
 }
 
 export async function proxyToApi(request: NextRequest, apiPath: string): Promise<Response> {
