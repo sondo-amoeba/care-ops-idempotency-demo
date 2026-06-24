@@ -1,5 +1,7 @@
 # Care-Ops SMS Idempotency Demo
 
+[![CI](https://github.com/sondo-amoeba/care-ops-idempotency-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/sondo-amoeba/care-ops-idempotency-demo/actions/workflows/ci.yml)
+
 Public runnable lab for **replay-safe care-ops SMS** — inspired by private HIPAA-bound production work at Ellipsis Health, rebuilt so engineering reviewers can click through without cloning.
 
 **Live demo:** https://care-ops-idempotency-demo.vercel.app _(UI live — API requires Railway deploy + `API_PROXY_URL`)_
@@ -96,6 +98,20 @@ bash scripts/replay-storm.sh
 
 Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, YES confirmation orchestration, and 100× agent-workflow storm.
 
+## CI/CD
+
+**Option C (hybrid):** GitHub Actions owns quality gates; platforms own deploy.
+
+| Layer | Trigger | Mechanism |
+|-------|---------|-----------|
+| **CI** | Every PR + push to `main` | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — Postgres + Redis service containers, `pnpm test`, build API + web |
+| **CD — API** | Push to `main` | [Railway](https://railway.app/) GitHub integration, root `apps/api` |
+| **CD — Web** | Push to `main` | [Vercel](https://vercel.com/) GitHub integration, root `apps/web` |
+
+**Branch protection (recommended):** require CI status check before merge to `main`. Deploy runs only after green CI.
+
+No deploy secrets in GitHub — `DATABASE_URL`, `REDIS_URL`, and `API_PROXY_URL` live on Railway and Vercel.
+
 ## Docker (full stack)
 
 ```bash
@@ -133,20 +149,21 @@ Create a Redis database in [Upstash](https://upstash.com/) (Vercel marketplace i
 
 ### 3. API on Railway
 
-1. New project → **Deploy from GitHub** → this repo.
+1. New project → **Deploy from GitHub** → connect `sondo-amoeba/care-ops-idempotency-demo`.
 2. Set **Root Directory** to `apps/api`.
-3. Environment variables:
+3. Enable **Deploy on push** to `main` (after CI passes if branch protection is on).
+4. Environment variables:
    - `DATABASE_URL` — Postgres connection string
    - `REDIS_URL` — Upstash URL
    - `API_PORT` — `3001`
    - `NODE_ENV` — `production`
-4. Deploy. Note the public URL (e.g. `https://care-ops-api.up.railway.app`).
+5. Deploy. Note the public URL (e.g. `https://care-ops-api.up.railway.app`).
 
 TypeORM `synchronize: true` applies schema on first boot (demo only — not for production).
 
 ### 4. Web on Vercel
 
-1. Import repo in Vercel (same account as Glade demo).
+1. Import repo → connect GitHub `sondo-amoeba/care-ops-idempotency-demo` (Settings → Git if auto-link failed).
 2. **Root Directory:** `apps/web`
 3. **Install Command:** `cd ../.. && pnpm install`
 4. **Build Command:** `pnpm build`
