@@ -22,7 +22,28 @@ function traceLabel(event: CoordinatorTraceEvent): string {
     const keys = event.detail.policyKeys as string[];
     return `${event.name} [${keys.join(", ")}]`;
   }
+  if (event.detail && event.name === "gemini_plan") {
+    if (event.detail.liveAttempted) {
+      return `${event.name} → mock fallback (Gemini unavailable)`;
+    }
+    if (event.detail.model) {
+      return `${event.name} (${String(event.detail.model)})`;
+    }
+  }
   return event.name;
+}
+
+function geminiFallbackReason(events: CoordinatorTraceEvent[]): string | null {
+  const geminiEvent = events.find((event) => event.name === "gemini_plan");
+  if (!geminiEvent?.detail?.liveAttempted) return null;
+  const error = String(geminiEvent.detail.error ?? "");
+  if (error.includes("limit: 0")) {
+    return "Gemini free-tier quota unavailable — try gemini-2.5-flash or enable billing in AI Studio";
+  }
+  if (error.includes("429")) {
+    return "Gemini rate limited — fell back to mock planner";
+  }
+  return "Gemini call failed — fell back to mock planner";
 }
 
 export function CoordinatorPane({
@@ -157,6 +178,11 @@ export function CoordinatorPane({
 
   const isPending = run?.status === "awaiting_approval" && run.proposal?.status === "pending";
   const locked = disabled || busy;
+  const fallbackReason = geminiFallbackReason(trace);
+  const modelBadge =
+    run?.modelMode === "mock" && fallbackReason
+      ? "mock (Gemini fallback)"
+      : run?.modelMode ?? "—";
 
   return (
     <div className="space-y-4 rounded-lg border border-dashed border-primary/30 bg-slate-50/80 p-4">
@@ -164,7 +190,7 @@ export function CoordinatorPane({
         <h3 className="text-sm font-semibold text-primary">AI Coordinator</h3>
         <div className="flex flex-wrap gap-2 text-xs">
           <span className="badge-blue">{run?.graphEngine ?? "langgraph"}</span>
-          <span className="badge-amber">model: {run?.modelMode ?? "—"}</span>
+          <span className="badge-amber">model: {modelBadge}</span>
           {run?.checkpointReady ? (
             <span className="badge-green">checkpoint ready</span>
           ) : null}
@@ -199,6 +225,12 @@ export function CoordinatorPane({
             {run.status}
             {run.ineligibleReason ? ` · ${run.ineligibleReason}` : ""}
           </p>
+
+          {fallbackReason ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+              {fallbackReason}
+            </p>
+          ) : null}
 
           {run.proposal ? (
             <div className="space-y-2 rounded-md border border-border bg-white p-3 text-sm">

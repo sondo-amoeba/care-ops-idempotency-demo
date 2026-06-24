@@ -124,17 +124,18 @@ export class CoordinatorRunExecutor {
 
     if (this.usesGeminiPlanning(state) && this.geminiPlanner.isConfigured()) {
       try {
-        const draft = await this.geminiPlanner.plan(planContext);
+        const { draft, model } = await this.geminiPlanner.plan(planContext);
         await this.appendTrace(state.runId, "tool", "gemini_plan", {
           templateId: draft.templateId,
           provider: "gemini",
+          model,
         });
         return { ...state, proposalDraft: draft, modelMode: "live" };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await this.appendTrace(state.runId, "tool", "gemini_plan", {
           liveAttempted: true,
-          error: message,
+          error: message.length > 500 ? `${message.slice(0, 500)}…` : message,
           fallback: "mock",
         });
         await this.runRepo.update(state.runId, { modelMode: "mock" });

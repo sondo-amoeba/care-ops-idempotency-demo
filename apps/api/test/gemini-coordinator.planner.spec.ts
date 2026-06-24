@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GeminiCoordinatorPlanner } from "../src/coordinator/gemini-coordinator.planner";
+import {
+  GeminiCoordinatorPlanner,
+  isRetryableGeminiModelError,
+  resolveGeminiModelChain,
+} from "../src/coordinator/gemini-coordinator.planner";
 import { CoordinatorPlanContext } from "../src/coordinator/coordinator-proposal.types";
 
 const mockGenerateContent = vi.fn();
@@ -39,6 +43,12 @@ const baseContext: CoordinatorPlanContext = {
   ],
 };
 
+const validProposal = {
+  templateId: "appointment-confirmation",
+  body: "Reply YES to confirm.",
+  rationale: "Pending booking after voice visit.",
+};
+
 describe("GeminiCoordinatorPlanner", () => {
   const planner = new GeminiCoordinatorPlanner();
 
@@ -53,42 +63,44 @@ describe("GeminiCoordinatorPlanner", () => {
     expect(planner.isConfigured()).toBe(true);
   });
 
-  it("is not configured when COORDINATOR_MODEL_MODE is mock", () => {
-    vi.stubEnv("GEMINI_API_KEY", "test-key");
-    vi.stubEnv("COORDINATOR_MODEL_MODE", "mock");
-    expect(planner.isConfigured()).toBe(false);
+  it("defaults model chain to 2.5 flash family", () => {
+    vi.unstubAllEnvs();
+    expect(resolveGeminiModelChain()).toEqual([
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-1.5-flash",
+    ]);
   });
 
   it("parses structured JSON from Gemini", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     mockGenerateContent.mockResolvedValue({
       response: {
-        text: () =>
-          JSON.stringify({
-            templateId: "appointment-confirmation",
-            body: "Reply YES to confirm.",
-            rationale: "Pending booking after voice visit.",
-          }),
+        text: () => JSON.stringify(validProposal),
       },
     });
 
-    const draft = await planner.plan(baseContext);
-    expect(draft).toEqual({
-      templateId: "appointment-confirmation",
-      body: "Reply YES to confirm.",
-      rationale: "Pending booking after voice visit.",
-    });
+    const result = await planner.plan(baseContext);
+    expect(result.draft).toEqual(validProposal);
+    expect(result.model).toBe("gemini-2.5-flash");
   });
 
-  it("throws when Gemini returns incomplete JSON", async () => {
+  it("falls back when the first model hits limit 0", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
-    mockGenerateContent.mockResolvedValue({
-      response: {
-        text: () => JSON.stringify({ templateId: "follow-up" }),
-      },
-    });
+    mockGenerateContent
+      .mockRejectedValueOnce(new Error("429 limit: 0, model: gemini-2.5-flash"))
+      .mockResolvedValueOnce({
+        response: { text: () => JSON.stringify(validProposal) },
+      });
 
-    await expect(planner.plan(baseContext)).rejects.toThrow(/incomplete proposal JSON/);
+    const result = await planner.plan(baseContext);
+    expect(result.model).toBe("gemini-2.5-flash-lite");
+    expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats limit 0 errors as retryable", () => {
+    expect(isRetryableGeminiModelError(new Error("429 limit: 0"))).toBe(true);
+    expect(isRetryableGeminiModelError(new Error("invalid API key"))).toBe(false);
   });
 
   it("buildPrompt includes interaction statuses and policy chunks", () => {

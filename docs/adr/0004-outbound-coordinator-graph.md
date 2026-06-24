@@ -20,7 +20,7 @@ Render free tier sleeps after idle; a coordinator run may pause at approval for 
   - **execute** (post-approval only): `send_outbound_sms` → wraps `SmsService.sendOutbound` with `source: ai_coordinator`
 - The LLM never sends during **plan**. Side effects flow only through the graph's **execute** node.
 - **Pluggable coordinator model** behind the **plan** phase:
-  - **Live (Gemini-only):** when `GEMINI_API_KEY` is set — single structured JSON call via `@google/generative-ai` (`gemini-2.0-flash` default, `GEMINI_MODEL` override). Observe output (bundle + RAG chunks) is passed as prompt context.
+  - **Live (Gemini-only):** when `GEMINI_API_KEY` is set — single structured JSON call via `@google/generative-ai` (`gemini-2.5-flash` default with model fallback chain, `GEMINI_MODEL` override). Observe output (bundle + RAG chunks) is passed as prompt context.
   - **Mock:** CI, no key, or `COORDINATOR_MODEL_MODE=mock` — deterministic state → proposal mapping; same graph path.
   - **Graceful fallback:** on Gemini error (429, timeout, bad JSON) → mock proposal for that run, `modelMode` recorded as `mock`, trace includes `liveAttempted: true`.
   - **Inbound coordinator runs** (router-sourced `RESCHEDULE` / `UNKNOWN`) stay deterministic — no Gemini on inbound signal type.
