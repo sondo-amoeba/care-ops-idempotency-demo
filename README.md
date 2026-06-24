@@ -4,7 +4,7 @@
 
 Public runnable lab for **replay-safe care-ops SMS** — inspired by private HIPAA-bound production work at Ellipsis Health, rebuilt so engineering reviewers can click through without cloning.
 
-**Live demo:** https://care-ops-idempotency-demo.vercel.app _(UI live — API requires Railway deploy + `API_PROXY_URL`)_
+**Live demo:** https://care-ops-idempotency-demo.vercel.app _(UI on Vercel — wire API via [Deploy](#deploy-vercel--render--0mo) below)_
 
 **Repository:** https://github.com/sondo-amoeba/care-ops-idempotency-demo
 
@@ -36,7 +36,7 @@ Production code was private. This repo shows the **invariants and architecture**
 Browser
   → Next.js (Vercel) — Care Agent Console
        ↓ rewrites /care-ops/* and /webhooks/*
-  → NestJS API (Railway / Render)
+  → NestJS API (Render free)
        ↓
   PostgreSQL (Neon / Vercel Postgres)     Redis (Upstash)
        │                                        │
@@ -105,12 +105,13 @@ Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**
 | Layer | Trigger | Mechanism |
 |-------|---------|-----------|
 | **CI** | Every PR + push to `main` | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — Postgres + Redis service containers, `pnpm test`, build API + web |
-| **CD — API** | Push to `main` | [Railway](https://railway.app/) GitHub integration, root `apps/api` |
+| **CD — API** | Push to `main` | [Render](https://render.com/) free web service (Docker), root `apps/api` — see [`render.yaml`](render.yaml) |
 | **CD — Web** | Push to `main` | [Vercel](https://vercel.com/) GitHub integration, root `apps/web` |
+| **Keep-warm** | Every 10 min | [`.github/workflows/keep-warm.yml`](.github/workflows/keep-warm.yml) — avoids Render cold starts |
 
 **Branch protection (recommended):** require CI status check before merge to `main`. Deploy runs only after green CI.
 
-No deploy secrets in GitHub — `DATABASE_URL`, `REDIS_URL`, and `API_PROXY_URL` live on Railway and Vercel.
+No deploy secrets in GitHub — `DATABASE_URL`, `REDIS_URL` on Render; `API_PROXY_URL` on Vercel. **Total cost: $0/mo** (Vercel + Render + Neon + Upstash free tiers).
 
 ## Docker (full stack)
 
@@ -135,31 +136,50 @@ docker compose up --build
 | GET/POST | `/care-ops/eligibility/rules` | List / toggle rules |
 | GET | `/care-ops/metrics/duplicates` | Duplicate stats |
 
-## Deploy (Vercel + Railway)
+## Deploy (Vercel + Render — $0/mo)
 
-Split stack — same pattern as the [Glade bankruptcy demo](https://github.com/sondo-amoeba/bankruptcy-intake-triage): **Vercel for the reviewer-facing URL**, managed Postgres + Redis, API on a container host.
+Split stack — same reviewer pattern as the [Glade bankruptcy demo](https://github.com/sondo-amoeba/bankruptcy-intake-triage): **Vercel for the public URL**, managed Postgres + Redis on free tiers, NestJS API on Render free (Docker).
 
-### 1. Postgres (Neon / Vercel Postgres)
+| Service | Provider | Tier | Cost |
+|---------|----------|------|------|
+| Web | Vercel | Hobby | $0 |
+| API | Render | Free web service | $0 |
+| Postgres | Neon | Free | $0 |
+| Redis | Upstash | Free | $0 |
 
-Create a database (Vercel Storage → Postgres, or Neon). Copy `DATABASE_URL`.
+### 1. Postgres (Neon)
+
+1. [neon.tech](https://neon.tech) → new project → copy `DATABASE_URL`.
+
+Do **not** use Render's free Postgres — it expires after ~30 days.
 
 ### 2. Redis (Upstash)
 
-Create a Redis database in [Upstash](https://upstash.com/) (Vercel marketplace integration works). Copy `REDIS_URL`.
+1. [upstash.com](https://upstash.com/) → new Redis database → copy `REDIS_URL`.
+2. Vercel marketplace integration also works.
 
-### 3. API on Railway
+### 3. API on Render
 
-1. New project → **Deploy from GitHub** → connect `sondo-amoeba/care-ops-idempotency-demo`.
-2. Set **Root Directory** to `apps/api`.
-3. Enable **Deploy on push** to `main` (after CI passes if branch protection is on).
-4. Environment variables:
-   - `DATABASE_URL` — Postgres connection string
+**Option A — Blueprint (recommended)**
+
+1. [render.com](https://render.com/) → **New → Blueprint** → connect `sondo-amoeba/care-ops-idempotency-demo`.
+2. Render reads [`render.yaml`](render.yaml) — creates `care-ops-api` web service (Docker, free plan).
+3. In the dashboard, set sync'd secrets:
+   - `DATABASE_URL` — Neon connection string
    - `REDIS_URL` — Upstash URL
-   - `API_PORT` — `3001`
-   - `NODE_ENV` — `production`
-5. Deploy. Note the public URL (e.g. `https://care-ops-api.up.railway.app`).
+4. Deploy → copy the public URL (e.g. `https://care-ops-api.onrender.com`).
 
-TypeORM `synchronize: true` applies schema on first boot (demo only — not for production).
+**Option B — Manual web service**
+
+1. **New → Web Service** → connect repo.
+2. **Root Directory:** `apps/api`
+3. **Runtime:** Docker
+4. **Instance type:** Free
+5. Same env vars as above (`API_PORT=3001`, `NODE_ENV=production` are in `render.yaml` defaults).
+
+TypeORM `synchronize: true` applies schema on first boot (demo only).
+
+**Render free caveat:** services spin down after 15 min idle (~30–60s cold start). The [`keep-warm`](.github/workflows/keep-warm.yml) workflow pings every 10 min once the API is wired.
 
 ### 4. Web on Vercel
 
@@ -168,16 +188,20 @@ TypeORM `synchronize: true` applies schema on first boot (demo only — not for 
 3. **Install Command:** `cd ../.. && pnpm install`
 4. **Build Command:** `pnpm build`
 5. Environment variable:
-   - `API_PROXY_URL` — Railway API URL from step 3
-6. Deploy (`vercel --prod` or push to `main` after GitHub connect)
+   - `API_PROXY_URL` — Render API URL from step 3
+6. Redeploy
 
 Reviewers hit one URL; Next.js rewrites proxy `/care-ops/*` and `/webhooks/*` to the API.
 
-**Note:** Do not use Vercel's experimental NestJS service — TypeORM decorators fail on serverless. Keep the API on Railway.
+**Note:** Do not use Vercel's experimental NestJS service — TypeORM decorators fail on serverless. Keep the API on Render.
+
+### 5. Verify
+
+Open https://care-ops-idempotency-demo.vercel.app → **New care thread** → **50× replay storm**.
 
 ### Post-deploy
 
-Update the **Live demo** link at the top of this README.
+Keep-warm runs automatically on `main`. Disable it in Render dashboard if you suspend the API.
 
 ## Tradeoffs and v1 cuts
 

@@ -1,0 +1,23 @@
+# Render Blueprint — $0 free tier API (Docker)
+# https://render.com/docs/blueprint-spec
+#
+# After connect: set DATABASE_URL (Neon) and REDIS_URL (Upstash) in the dashboard.
+# Then set API_PROXY_URL on Vercel to the Render service URL.
+
+services:
+  - type: web
+    name: care-ops-api
+    runtime: docker
+    rootDir: apps/api
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /care-ops/interactions
+    envVars:
+      - key: API_PORT
+        value: "3001"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false

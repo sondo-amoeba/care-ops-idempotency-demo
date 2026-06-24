@@ -1,0 +1,20 @@
+name: Keep warm
+
+# Render free tier spins down after 15 min idle (~30–60s cold start).
+# Ping every 10 min via the Vercel proxy so reviewers get instant responses.
+# Uses ~744 instance-hours/month — within Render's 750 free hours.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping API through Vercel proxy
+        run: |
+          curl -sf --max-time 30 \
+            "https://care-ops-idempotency-demo.vercel.app/care-ops/interactions" \
+            || echo "Ping failed — API may not be deployed yet"
