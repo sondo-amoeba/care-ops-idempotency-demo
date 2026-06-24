@@ -11,7 +11,9 @@ import { EligibilityService } from "../eligibility/eligibility.service";
 import { InteractionService } from "../interactions/interaction.service";
 import { CareContextService } from "../rag/care-context.service";
 import { SmsService } from "../sms/sms.service";
-import { PatientIntent } from "./patient-intent";
+import { CoordinatorProposalDraft } from "./coordinator-proposal.types";
+import { GeminiCoordinatorPlanner } from "./gemini-coordinator.planner";
+import { buildMockPlan } from "./mock-coordinator.planner";
 import { StartCoordinatorRunInput } from "./coordinator.types";
 
 export interface CoordinatorGraphState {
@@ -21,6 +23,7 @@ export interface CoordinatorGraphState {
   status: CoordinatorRun["status"];
   modelMode: CoordinatorRun["modelMode"];
   proposal: CoordinatorProposal | null;
+  proposalDraft: CoordinatorProposalDraft | null;
   ineligibleReason: string | null;
   windowStart?: string;
   sendResult?: Awaited<ReturnType<SmsService["sendOutbound"]>>;
@@ -39,11 +42,13 @@ export class CoordinatorRunExecutor {
     @Inject(EligibilityService) private readonly eligibility: EligibilityService,
     @Inject(CareContextService) private readonly careContext: CareContextService,
     @Inject(SmsService) private readonly sms: SmsService,
+    @Inject(GeminiCoordinatorPlanner)
+    private readonly geminiPlanner: GeminiCoordinatorPlanner,
   ) {}
 
   resolveModelMode(): CoordinatorRun["modelMode"] {
     if (process.env.COORDINATOR_MODEL_MODE === "mock") return "mock";
-    if (process.env.OPENAI_API_KEY) return "live";
+    if (process.env.GEMINI_API_KEY?.trim()) return "live";
     return "mock";
   }
 
@@ -57,7 +62,12 @@ export class CoordinatorRunExecutor {
         signalType: state.input.signal,
       }),
     );
-    return { ...state, runId: run.id, status: run.status };
+    return {
+      ...state,
+      runId: run.id,
+      status: run.status,
+      proposalDraft: null,
+    };
   }
 
   async observe(state: CoordinatorGraphState): Promise<CoordinatorGraphState> {
@@ -95,6 +105,7 @@ export class CoordinatorRunExecutor {
         status: "ineligible",
         ineligibleReason: outboundEligibility.reason ?? "not_eligible",
         proposal: null,
+        proposalDraft: null,
       };
     }
     return state;
@@ -102,20 +113,56 @@ export class CoordinatorRunExecutor {
 
   async plan(state: CoordinatorGraphState): Promise<CoordinatorGraphState> {
     await this.appendTrace(state.runId, "phase", "plan");
-    return state;
+
+    const detail = await this.interactions.getThreadDetail(state.interactionId);
+    const retrievalQuery = this.buildRetrievalQuery(detail, state.input);
+    const contextChunks = await this.careContext.retrieveCareContext(
+      retrievalQuery,
+      detail.interaction.programId,
+    );
+    const planContext = { detail, contextChunks, input: state.input };
+
+    if (this.usesGeminiPlanning(state) && this.geminiPlanner.isConfigured()) {
+      try {
+        const draft = await this.geminiPlanner.plan(planContext);
+        await this.appendTrace(state.runId, "tool", "gemini_plan", {
+          templateId: draft.templateId,
+          provider: "gemini",
+        });
+        return { ...state, proposalDraft: draft, modelMode: "live" };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.appendTrace(state.runId, "tool", "gemini_plan", {
+          liveAttempted: true,
+          error: message,
+          fallback: "mock",
+        });
+        await this.runRepo.update(state.runId, { modelMode: "mock" });
+        return {
+          ...state,
+          proposalDraft: buildMockPlan(planContext),
+          modelMode: "mock",
+        };
+      }
+    }
+
+    const draft = buildMockPlan(planContext);
+    return { ...state, proposalDraft: draft };
   }
 
   async propose(state: CoordinatorGraphState): Promise<CoordinatorGraphState> {
-    const detail = await this.interactions.getThreadDetail(state.interactionId);
-    const proposalDraft = this.planProposal(detail, state.input);
+    if (!state.proposalDraft) {
+      throw new Error("Coordinator plan phase did not produce a proposal draft");
+    }
+
     await this.appendTrace(state.runId, "phase", "propose");
     const proposal = await this.proposalRepo.save(
       this.proposalRepo.create({
         runId: state.runId,
         interactionId: state.interactionId,
-        templateId: proposalDraft.templateId,
-        body: proposalDraft.body,
-        rationale: proposalDraft.rationale,
+        templateId: state.proposalDraft.templateId,
+        body: state.proposalDraft.body,
+        rationale: state.proposalDraft.rationale,
         status: "pending",
       }),
     );
@@ -190,6 +237,10 @@ export class CoordinatorRunExecutor {
     return { run, proposal };
   }
 
+  private usesGeminiPlanning(state: CoordinatorGraphState): boolean {
+    return state.input.signal !== "inbound";
+  }
+
   private async appendTrace(
     runId: string,
     eventType: CoordinatorTraceEventType,
@@ -213,53 +264,5 @@ export class CoordinatorRunExecutor {
       return "unclear inbound patient message human review";
     }
     return "post-visit appointment confirmation outbound SMS policy";
-  }
-
-  private planProposal(
-    detail: Awaited<ReturnType<InteractionService["getThreadDetail"]>>,
-    input: StartCoordinatorRunInput,
-  ) {
-    if (input.signal === "inbound" && input.patientIntent === "RESCHEDULE") {
-      return {
-        templateId: "reschedule-offer",
-        body: "A care coordinator will follow up with new appointment times.",
-        rationale:
-          "Patient requested reschedule; mock router requires HITL before outbound send.",
-      };
-    }
-    if (input.signal === "inbound" && input.patientIntent === "UNKNOWN") {
-      return {
-        templateId: "needs-review",
-        body: "Your care team will review your message and respond shortly.",
-        rationale: "Inbound intent unclear; mock router escalates to human review.",
-      };
-    }
-    return this.planWithMockModel(detail);
-  }
-
-  private planWithMockModel(detail: Awaited<ReturnType<InteractionService["getThreadDetail"]>>) {
-    const voiceCompleted = detail.voiceSession?.status === "completed";
-    const bookingPending = detail.booking?.status === "pending";
-    if (voiceCompleted && bookingPending) {
-      return {
-        templateId: "appointment-confirmation",
-        body: "Please reply YES to confirm your upcoming visit.",
-        rationale:
-          "Voice visit completed with pending booking; mock model proposes confirmation SMS.",
-      };
-    }
-    if (bookingPending) {
-      return {
-        templateId: "appointment-confirmation",
-        body: "Please reply YES to confirm your upcoming visit.",
-        rationale:
-          "Booking is pending after care episode; mock model proposes confirmation SMS.",
-      };
-    }
-    return {
-      templateId: "follow-up",
-      body: "Your care team will follow up with next steps.",
-      rationale: "No pending booking action; mock model proposes generic follow-up.",
-    };
   }
 }

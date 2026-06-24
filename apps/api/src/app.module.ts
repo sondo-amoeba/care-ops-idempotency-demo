@@ -17,6 +17,7 @@ import { CareOpsController } from "./care-ops/care-ops.controller";
 import { CoordinatorController } from "./coordinator/coordinator.controller";
 import { CoordinatorService } from "./coordinator/coordinator.service";
 import { CoordinatorRunExecutor } from "./coordinator/coordinator-run.executor";
+import { GeminiCoordinatorPlanner } from "./coordinator/gemini-coordinator.planner";
 import { OutboundCoordinatorGraphRunner } from "./coordinator/outbound-coordinator-graph.runner";
 import { InboundRouterService } from "./supervisor/inbound-router.service";
 import { SupervisorService } from "./supervisor/supervisor.service";
@@ -75,6 +76,7 @@ function databaseConfig() {
     RedisService,
     SeedService,
     CareContextService,
+    GeminiCoordinatorPlanner,
     CoordinatorRunExecutor,
     OutboundCoordinatorGraphRunner,
     CoordinatorService,

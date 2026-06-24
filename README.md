@@ -108,9 +108,9 @@ pnpm test
 bash scripts/replay-storm.sh
 ```
 
-Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, YES confirmation orchestration, 100× agent-workflow storm, **coordinator graph + HITL**, inbound intent routing, and RAG trace events (18 tests).
+Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, YES confirmation orchestration, 100× agent-workflow storm, **coordinator graph + HITL + Gemini fallback**, inbound intent routing, RAG trace events, and Gemini planner unit tests (24 tests).
 
-Set `COORDINATOR_MODEL_MODE=mock` (default when no `OPENAI_API_KEY`) for deterministic CI. Optional `OPENAI_API_KEY` on Render enables live LLM planning.
+Set `COORDINATOR_MODEL_MODE=mock` (default when no `GEMINI_API_KEY`) for deterministic CI. Optional `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) enables live Gemini planning (free tier, no card).
 
 ## CI/CD
 
@@ -231,7 +231,7 @@ Keep-warm runs automatically on `main`. Disable it in Render dashboard if you su
 - Eligibility is program-level (not per-patient opt-out table)
 - NestJS monolith module layout (domain modules deferred)
 - `synchronize: true` for demo schema — use migrations in production
-- Coordinator uses **mock model** in CI and by default on Render (set `OPENAI_API_KEY` for live LLM)
+- Coordinator uses **mock model** in CI and by default on Render (set `GEMINI_API_KEY` for live Gemini; `GEMINI_MODEL` optional, default `gemini-2.0-flash`)
 - LangGraph + pgvector require Neon Postgres with `vector` extension enabled
 - Sanitized fake Twilio SIDs — not a Twilio integration test
 

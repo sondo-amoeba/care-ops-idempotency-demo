@@ -21,3 +21,5 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false

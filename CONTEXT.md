@@ -97,8 +97,10 @@ Pluggable reasoning backend behind the **plan** phase. The **Coordinator graph**
 
 | Adapter | When | Behavior |
 |---------|------|----------|
-| **Live** | `OPENAI_API_KEY` present | Real LLM planning, tool selection, and rationale |
-| **Mock** | CI, or no API key | Deterministic state → proposal mapping; same graph path |
+| **Live** | `GEMINI_API_KEY` present | Gemini generates structured **Coordinator proposal** (template, body, rationale) from observe context |
+| **Mock** | CI, no key, or Gemini unavailable | Deterministic state → proposal mapping; same graph path |
+
+Live mode is **Gemini-only** in this repo — no OpenAI path. On quota or API errors during **plan**, fall back to **Mock** for that run: `modelMode` records `mock`, trace includes `liveAttempted: true` and the error reason. Graph continues to HITL.
 
 The active adapter is visible to the care coordinator (mode badge in console).
 
@@ -160,7 +162,7 @@ RAG layer that fetches program and episode-scoped snippets before specialist gra
 
 **Store:** `care_context_chunks` in Postgres with pgvector embeddings, scoped by `program_id`.
 
-**Embeddings:** Live uses OpenAI `text-embedding-3-small`; mock uses deterministic hash vectors for CI.
+**Embeddings:** Deterministic hash vectors in all environments (CI and production). No embedding API — keeps RAG $0-aligned; three seed chunks make semantic ranking unnecessary.
 
 **Seed chunks:** Synthetic program policies (confirm window, reschedule HITL rule, opt-out handling) — no PHI.
 

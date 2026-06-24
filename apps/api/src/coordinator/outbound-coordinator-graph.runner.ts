@@ -16,6 +16,7 @@ const GraphState = Annotation.Root({
   status: Annotation<CoordinatorGraphState["status"]>,
   modelMode: Annotation<CoordinatorGraphState["modelMode"]>,
   proposal: Annotation<CoordinatorGraphState["proposal"]>,
+  proposalDraft: Annotation<CoordinatorGraphState["proposalDraft"]>,
   ineligibleReason: Annotation<CoordinatorGraphState["ineligibleReason"]>,
   windowStart: Annotation<string | undefined>,
   sendResult: Annotation<CoordinatorGraphState["sendResult"]>,
@@ -47,6 +48,7 @@ export class OutboundCoordinatorGraphRunner implements OnModuleInit {
       status: "running",
       modelMode: this.executor.resolveModelMode(),
       proposal: null,
+      proposalDraft: null,
       ineligibleReason: null,
     };
 

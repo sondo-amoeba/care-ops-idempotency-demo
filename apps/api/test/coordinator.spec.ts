@@ -1,9 +1,10 @@
 import "reflect-metadata";
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
+import { GeminiCoordinatorPlanner } from "../src/coordinator/gemini-coordinator.planner";
 
 describe("Outbound coordinator (e2e)", () => {
   let app: INestApplication;
@@ -313,5 +314,66 @@ describe("Outbound coordinator (e2e)", () => {
     expect(stream.text).toContain("event: interrupt");
     expect(stream.text).toContain('"name":"observe"');
     expect(stream.text).toContain('"name":"await_approval"');
+  });
+});
+
+describe("Outbound coordinator Gemini fallback (e2e)", () => {
+  let app: INestApplication;
+
+  beforeAll(async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    delete process.env.COORDINATOR_MODEL_MODE;
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(GeminiCoordinatorPlanner)
+      .useValue({
+        isConfigured: () => true,
+        plan: vi.fn().mockRejectedValue(new Error("429 quota exceeded")),
+      })
+      .compile();
+
+    app = moduleRef.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await app.init();
+  });
+
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    process.env.COORDINATOR_MODEL_MODE = "mock";
+    await app.close();
+  });
+
+  it("falls back to mock when Gemini fails and records liveAttempted in trace", async () => {
+    const created = await request(app.getHttpServer())
+      .post("/care-ops/interactions")
+      .send({ patientId: "coord-gemini-fallback", programId: "behavioral-health-outreach" })
+      .expect(201);
+
+    const run = await request(app.getHttpServer())
+      .post("/care-ops/coordinator/runs")
+      .send({ interactionId: created.body.id, signal: "manual" })
+      .expect(201);
+
+    expect(run.body.status).toBe("awaiting_approval");
+    expect(run.body.modelMode).toBe("mock");
+    expect(run.body.proposal).toMatchObject({
+      status: "pending",
+      templateId: "appointment-confirmation",
+    });
+
+    const trace = await request(app.getHttpServer())
+      .get(`/care-ops/coordinator/runs/${run.body.id}/trace`)
+      .expect(200);
+
+    const geminiEvent = trace.body.events.find(
+      (e: { name: string }) => e.name === "gemini_plan",
+    );
+    expect(geminiEvent?.detail).toMatchObject({
+      liveAttempted: true,
+      error: "429 quota exceeded",
+      fallback: "mock",
+    });
   });
 });

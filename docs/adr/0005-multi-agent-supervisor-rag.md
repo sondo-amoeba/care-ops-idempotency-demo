@@ -26,7 +26,7 @@ The expanded demo must also showcase multi-agent orchestration and RAG without t
   - `RESCHEDULE` → create outbound coordinator proposal for HITL
   - `OPT_OUT` → terminal audit only; no outbound
   - `UNKNOWN` → coordinator proposal flagged for human review
-- Use the same live/mock model adapter pattern as ADR-0004 for `classify`.
+- **Inbound classify stays deterministic** (keyword/regex) — no Gemini on the inbound router. Gemini applies only to outbound coordinator **plan** (ADR-0004).
 - Reuse ADR-0004 proposal, approval, and execute machinery for intents that need HITL (`RESCHEDULE`, `UNKNOWN`).
 
 ### RAG as shared retrieval tool (not a conversational agent)
@@ -34,8 +34,7 @@ The expanded demo must also showcase multi-agent orchestration and RAG without t
 - Add `retrieve_care_context(query, program_id, k=3)` as a shared read tool invoked in each specialist's `observe` phase.
 - Store synthetic program policy chunks in `care_context_chunks` with **pgvector** embeddings on existing Neon Postgres — scoped by `program_id`, no PHI.
 - Seed chunks cover confirm-window policy, reschedule HITL rule, and opt-out handling.
-- **Live embeddings:** OpenAI `text-embedding-3-small`.
-- **Mock embeddings:** deterministic hash → fixed vector so CI retrieval is reproducible without API calls.
+- **Embeddings:** deterministic hash vectors in all environments — no embedding API (CI = production).
 - Log retrieved chunk IDs and scores in `coordinator_trace_events` (visible in Tier 3; collapsed by default in UI).
 
 ### Demo depth tiers (scope boundary)
@@ -46,7 +45,7 @@ The expanded demo must also showcase multi-agent orchestration and RAG without t
 | 2 | Inbound non-YES message → proposal; SSE trace |
 | 3 | Supervisor dispatch, RAG chunks in trace — architecture on request |
 
-Explicitly **out of scope:** LLM supervisor routing, multi-agent peer swarms, real Twilio/OpenAI in CI, patient-level vector memory across episodes, separate `/coordinator` page.
+Explicitly **out of scope:** LLM supervisor routing, multi-agent peer swarms, real Twilio/Gemini in CI, patient-level vector memory across episodes, separate `/coordinator` page.
 
 ## Consequences
 
