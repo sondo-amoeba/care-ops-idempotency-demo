@@ -120,7 +120,7 @@ export default function CareAgentConsole() {
   });
 
   const heroMode: HeroVizMode =
-    walkthrough.current === 4 || stormRunning || stormTicks.length > 0
+    walkthrough.current === 4 || stormRunning
       ? "storm"
       : walkthrough.current === 5 || walkthrough.current === 6
         ? "supervisor"
