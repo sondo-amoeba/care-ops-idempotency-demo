@@ -13,10 +13,7 @@ Clinical care-ops programs send two-way SMS around voice visits. When Twilio rep
 **Live demo:** https://care-ops-idempotency-demo.vercel.app  
 **Repository:** https://github.com/sondo-amoeba/care-ops-idempotency-demo
 
-**Screenshots to add before publish:**
-1. `[screenshot: coordinator graph view — steps 2–3, proposal at await_approval]`
-2. `[screenshot: replay storm — 50 attempts collapsing to 1 accepted row]`
-3. `[screenshot: supervisor graph — Tier 2 reschedule path, step 6]`
+**Images:** Upload the three PNGs from `docs/blog/assets/` when publishing (Peerlist editor does not pull from GitHub automatically).
 
 ---
 
@@ -181,7 +178,7 @@ Key properties:
 
 The console streams coordinator trace events over SSE (`phase`, `tool`, `proposal`, `interrupt`, `complete`) and renders them in a React Flow graph that highlights the active node as the run progresses.
 
-`[screenshot: coordinator graph view — steps 2–3, proposal at await_approval]`
+![LangGraph outbound coordinator paused at await_approval — HITL gate highlighted, RAG retrieval branch visible](assets/coordinator-graph-await-approval.png)
 
 ## Bidirectional care-ops: supervisor + inbound router
 
@@ -198,7 +195,7 @@ The inbound router classifies body text into patient intent (`CONFIRM`, `RESCHED
 
 RAG is a shared read tool, not a conversational agent. Synthetic program policy chunks live in Postgres with pgvector embeddings (deterministic hash vectors — no embedding API, CI equals production). The coordinator trace logs retrieved chunk IDs so reviewers can see policy context influencing proposals without a separate "chat with your policies" UI.
 
-`[screenshot: supervisor graph — Tier 2 reschedule path, step 6]`
+![Care ops supervisor dispatch view — deterministic router fan-out to outbound coordinator and inbound router (Tier 2, step 5)](assets/supervisor-dispatch-graph.png)
 
 ## Proof: the replay storm
 
@@ -209,7 +206,7 @@ The demo's hero moment is step 4 of the guided walkthrough: **50× replay storm*
 - One accepted row locks green
 - Final frame shows accepted/blocked ratio tied to activity log numbers
 
-`[screenshot: replay storm — 50 attempts collapsing to 1 accepted row]`
+![Replay storm — 50 concurrent workflow triggers collapse to 1 accepted outbox row (49 blocked)](assets/replay-storm-hero.png)
 
 Vitest covers the same scenario under parallel load. A shell script (`scripts/replay-storm.sh`) runs it headless for CI. The point is not the animation — it is that **the invariant holds under the retry patterns agents introduce**, not just under polite sequential tests.
 
