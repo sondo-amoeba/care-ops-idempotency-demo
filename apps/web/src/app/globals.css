@@ -41,3 +41,27 @@ body {
 .badge-blue {
   @apply badge bg-blue-100 text-blue-800;
 }
+
+@keyframes storm-block {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-storm-block {
+  animation: storm-block 0.35s ease-out;
+}
+
+/* React Flow — dark hero panel overrides */
+.react-flow__pane {
+  cursor: default;
+}

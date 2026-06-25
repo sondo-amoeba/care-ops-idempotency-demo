@@ -6,60 +6,43 @@ import {
   type CoordinatorRun,
   type CoordinatorTraceEvent,
 } from "@/lib/api";
+import { geminiFallbackReason } from "@/lib/trace-label";
 
 type CoordinatorPaneProps = {
   interactionId: string | null;
   disabled: boolean;
   onLog: (line: string) => void;
   onRefresh: () => Promise<void>;
+  onRunChange?: (run: CoordinatorRun | null) => void;
+  onTraceChange?: (trace: CoordinatorTraceEvent[]) => void;
 };
-
-function traceLabel(event: CoordinatorTraceEvent): string {
-  if (event.detail && "allowed" in event.detail) {
-    return `${event.name} (allowed=${String(event.detail.allowed)})`;
-  }
-  if (event.detail && "policyKeys" in event.detail) {
-    const keys = event.detail.policyKeys as string[];
-    return `${event.name} [${keys.join(", ")}]`;
-  }
-  if (event.detail && event.name === "gemini_plan") {
-    if (event.detail.liveAttempted) {
-      return `${event.name} → mock fallback (Gemini unavailable)`;
-    }
-    if (event.detail.model) {
-      return `${event.name} (${String(event.detail.model)})`;
-    }
-  }
-  return event.name;
-}
-
-function geminiFallbackReason(events: CoordinatorTraceEvent[]): string | null {
-  const geminiEvent = events.find((event) => event.name === "gemini_plan");
-  if (!geminiEvent?.detail?.liveAttempted) return null;
-  const error = String(geminiEvent.detail.error ?? "");
-  if (error.includes("limit: 0")) {
-    return "Gemini free-tier quota unavailable — try gemini-2.5-flash or enable billing in AI Studio";
-  }
-  if (error.includes("429")) {
-    return "Gemini rate limited — fell back to mock planner";
-  }
-  return "Gemini call failed — fell back to mock planner";
-}
 
 export function CoordinatorPane({
   interactionId,
   disabled,
   onLog,
   onRefresh,
+  onRunChange,
+  onTraceChange,
 }: CoordinatorPaneProps) {
   const [run, setRun] = useState<CoordinatorRun | null>(null);
+
+  function updateRun(next: CoordinatorRun | null) {
+    setRun(next);
+    onRunChange?.(next);
+  }
   const [trace, setTrace] = useState<CoordinatorTraceEvent[]>([]);
-  const [traceOpen, setTraceOpen] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setRun(null);
+    onTraceChange?.(trace);
+  }, [trace, onTraceChange]);
+
+  useEffect(() => {
+    updateRun(null);
     setTrace([]);
+    onTraceChange?.([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset run when interaction changes
   }, [interactionId]);
 
   const loadTrace = useCallback(async (runId: string) => {
@@ -128,7 +111,7 @@ export function CoordinatorPane({
         signal === "lifecycle"
           ? (await careOpsApi.completeVoiceLifecycle(interactionId)).coordinatorRun
           : await careOpsApi.startCoordinatorRun(interactionId, signal);
-      setRun(started);
+      updateRun(started);
       onLog(
         `Coordinator ${signal} → status=${started.status} model=${started.modelMode}${started.resumed ? " (resumed)" : ""}`,
       );
@@ -148,7 +131,7 @@ export function CoordinatorPane({
         run.id,
         new Date().toISOString(),
       );
-      setRun(approved);
+      updateRun(approved);
       onLog(
         `Coordinator approved → duplicate=${String(approved.sendResult?.duplicate ?? false)}`,
       );
@@ -166,7 +149,7 @@ export function CoordinatorPane({
     setBusy(true);
     try {
       const rejected = await careOpsApi.rejectCoordinatorRun(run.id);
-      setRun(rejected);
+      updateRun(rejected);
       onLog("Coordinator proposal rejected");
       await loadTrace(run.id);
     } catch (err) {
@@ -185,9 +168,14 @@ export function CoordinatorPane({
       : run?.modelMode ?? "—";
 
   return (
-    <div className="space-y-4 rounded-lg border border-dashed border-primary/30 bg-slate-50/80 p-4">
+    <div className="space-y-4 rounded-lg border-2 border-primary/25 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-primary">AI Coordinator</h3>
+        <div>
+          <h3 className="text-sm font-semibold text-primary">AI care coordinator</h3>
+          <p className="text-xs text-slate-500">
+            Observes the episode, drafts SMS — you approve before anything sends.
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2 text-xs">
           <span className="badge-blue">{run?.graphEngine ?? "langgraph"}</span>
           <span className="badge-amber">model: {modelBadge}</span>
@@ -203,20 +191,13 @@ export function CoordinatorPane({
           disabled={!interactionId || locked}
           onClick={() => runCoordinator("manual")}
         >
-          Run AI coordinator
-        </button>
-        <button
-          className="btn-secondary text-xs"
-          disabled={!interactionId || locked}
-          onClick={() => runCoordinator("lifecycle")}
-        >
-          Simulate visit ended
+          Run AI care coordinator
         </button>
       </div>
 
       {!run ? (
         <p className="text-xs text-slate-500">
-          Start a coordinator run to see proposal, trace, and approval gate.
+          Step 2 — start a run to see the draft SMS, reasoning trace, and approval gate.
         </p>
       ) : (
         <>
@@ -234,43 +215,27 @@ export function CoordinatorPane({
 
           {run.proposal ? (
             <div className="space-y-2 rounded-md border border-border bg-white p-3 text-sm">
-              <div className="font-medium">Proposal · {run.proposal.templateId}</div>
+              <div className="font-medium">
+                Draft SMS for your review · {run.proposal.templateId}
+              </div>
               <p className="text-slate-700">{run.proposal.body}</p>
               <p className="text-xs text-slate-500">{run.proposal.rationale}</p>
               {isPending ? (
                 <div className="flex gap-2 pt-1">
                   <button className="btn flex-1 text-xs" disabled={locked} onClick={approve}>
-                    Approve
+                    Approve send
                   </button>
                   <button
                     className="btn-secondary flex-1 text-xs"
                     disabled={locked}
                     onClick={reject}
                   >
-                    Reject
+                    Reject draft
                   </button>
                 </div>
               ) : null}
             </div>
           ) : null}
-
-          <div>
-            <button
-              className="mb-2 text-xs font-semibold text-slate-600"
-              onClick={() => setTraceOpen((open) => !open)}
-            >
-              {traceOpen ? "▾" : "▸"} Coordinator trace ({trace.length})
-            </button>
-            {traceOpen ? (
-              <ol className="max-h-48 space-y-1 overflow-auto font-mono text-xs text-slate-600">
-                {trace.map((event) => (
-                  <li key={event.id} className="rounded border border-border bg-white px-2 py-1">
-                    <span className="text-primary">{event.eventType}</span> · {traceLabel(event)}
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-          </div>
         </>
       )}
     </div>

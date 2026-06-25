@@ -172,7 +172,84 @@ RAG layer that fetches program and episode-scoped snippets before specialist gra
 |------|----------------------------------|
 | **Tier 1 (5 min)** | Outbound coordinator + approval + replay storm idempotency |
 | **Tier 2 (stretch)** | Inbound router classifies non-YES reply; SSE trace animates live |
-| **Tier 3 (architecture)** | Supervisor dispatch, RAG retrieval chunks visible in trace — present in code/tests, not narrated unless asked |
+| **Tier 3 (architecture)** | Supervisor dispatch, RAG retrieval chunks visible in trace — promoted into walkthrough steps 5–6, not buried in Stretch demo |
+| **Tier 4 (if asked)** | Completed call report edit — Vapi webhook → HITL edit → audit; second workflow in repo, not part of the 5-min hero |
+
+**Demo scope rule**
+
+This repo is one **Ellipsis care-ops platform** artifact: **SMS orchestration** is the default hero walkthrough; **Completed call edit** is a secondary workflow surfaced only when a reviewer asks (Tier 4). Do not split into separate repos.
+
+**Enhancement build order**
+
+Planned SMS depth work, in sequence: (1) Tier 2/3 walkthrough + supervisor/inbound graphs + scheduling loop → (2) **Voice workflow phase** labels on orchestrator triggers → (3) **ReAct plan loop** in coordinator plan. Tier 4 Vapi edit after SMS depth is complete.
+
+## Console experience
+
+**Care coordinator console**
+
+The Next.js UI where a **Care coordinator** reviews patient episodes, approves AI-proposed SMS, and monitors message activity. Primary audience is a cold reviewer, not an engineer reading API docs.
+
+**Demo walkthrough**
+
+The default first-run narrative on the console: voice visit ends → **AI care coordinator** proposes follow-up SMS → **Care coordinator** approves → replay storm proves idempotency. Tier 1 only; copy and layout lead with this story.
+
+**Walkthrough tier rows**
+
+Tier 1 (steps 1–4) is always visible — the 5-min EM pitch. Tier 2 (steps 5–6) unlocks after step 4 completes — bidirectional orchestration labeled *continue if time*. Never six equal-weight steps on first load.
+
+_Avoid_: Showing all six steps with equal prominence on cold load
+
+**Architecture lab**
+
+Secondary console region for implementation probes — manual outbound send, workflow orchestrator trigger, webhook replays, eligibility toggles. Visible but visually subordinate to the **Demo walkthrough**; never competes for attention on first load.
+
+_Avoid_: "Developer mode", "advanced settings" (implies product config, not demo depth)
+
+**Stretch demo**
+
+Optional Tier 2 controls on the console — lifecycle trigger, inbound patient reply, delivery status callback. Collapsed by default beneath the **Demo walkthrough**; expands for reviewers who want the full stack narrative.
+
+**Walkthrough step**
+
+One numbered stage in the **Demo walkthrough**. Steps are visually highlighted in order but never hard-locked — reviewers may skip ahead. Tier 1: start episode → AI proposes SMS → care coordinator approves → replay storm. Tier 2/3 (planned): patient confirms YES → patient requests reschedule (supervisor + inbound router graphs).
+
+## Voice workflow phase
+
+When a **Workflow orchestrator** trigger fires relative to a **Voice session** — `pre_call`, `mid_call`, or `post_call`. Labels the same idempotent outbound path; mirrors Sage/Vapi agent workflow timing from Ellipsis production.
+
+_Avoid_: "agent phase", "call stage" — use **Voice workflow phase**
+
+## ReAct plan loop
+
+Bounded tool-use during the outbound coordinator **plan** phase — iteratively invokes read-only **Coordinator tools** (`get_interaction_state`, `list_messages`) before emitting a **Coordinator proposal**. Deferred in ADR-0004 v1; planned demo enhancement with trace events per tool round.
+
+## Console visualization
+
+**Coordinator graph view**
+
+Primary hero visualization during walkthrough steps 2–3. An animated rendering of the **Coordinator graph** that advances in sync with **Coordinator trace** SSE events — nodes highlight, tool calls branch off, **Approval gate** pulses at interrupt.
+
+Rendered with **React Flow** — read-only node layout mirroring the fixed **Coordinator graph** topology; trace events drive active-node highlighting and edge animation. Not an editor; reviewers cannot rearrange nodes.
+
+**Replay storm view**
+
+Primary hero visualization during walkthrough step 4. Replaces the **Coordinator graph view** in the same panel — animates 50 concurrent trigger attempts collapsing to one persisted outbound row. Proves **Outbound idempotency** visually, not just in metrics text.
+
+Style: **literal counter** — 50 staggered attempt ticks driven by real API results; duplicates flash amber and collapse; one accepted row locks green; final frame shows accepted/blocked ratio tied to activity log numbers.
+
+_Avoid_: Abstract particle or funnel-only animations disconnected from outbox row counts
+
+**Visualization handoff**
+
+The console swaps hero views by **Walkthrough step**: graph view (steps 2–3) → storm view (step 4). One spectacle region; no competing animated panels on screen at once.
+
+**Trace event log**
+
+Collapsed monospace list beneath the hero visualization. Same **Coordinator trace** events as today — expandable for observability drill-down. Subordinate to the React Flow graph; not removed.
+
+**Ops theater panel**
+
+Dark slate hero region (`#0f172a`) housing **Coordinator graph view** or **Replay storm view**. Contrasts with the light **Care coordinator console** — draws reviewer attention to animated infrastructure visuals without a full dark-mode rework.
 
 ## Status callback
 
@@ -181,6 +258,12 @@ Twilio delivery webhook path that updates an existing message row only. Never in
 ## Replay storm
 
 Demo scenario firing dozens of identical outbound triggers to prove duplicate delivery stays at one persisted row.
+
+## Completed call edit
+
+Secondary Tier 4 workflow in this repo — mirrors Ellipsis Vapi HITL edit: webhook ingests a completed voice call report, care coordinator reviews and edits before submit, audit trail preserved. Shares the same platform (**Interaction** bundle) but is not part of the SMS hero walkthrough.
+
+_Avoid_: "Vapi demo", "voice edit tab" in glossary — use **Completed call edit**
 
 ## Application code sample
 
