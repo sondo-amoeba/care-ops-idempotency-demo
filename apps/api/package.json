@@ -1,6 +1,7 @@
 {
   "name": "@care-ops/api",
   "version": "1.0.0",
+  "description": "NestJS API — replay-safe SMS invariants for the Care-Ops SMS Invariant Lab",
   "private": true,
   "scripts": {
     "dev": "nest start --watch",

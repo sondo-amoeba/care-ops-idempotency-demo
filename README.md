@@ -1,10 +1,10 @@
-# Care-Ops SMS Idempotency Demo
+# Care-Ops SMS Invariant Lab
 
 [![CI](https://github.com/sondo-amoeba/care-ops-idempotency-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/sondo-amoeba/care-ops-idempotency-demo/actions/workflows/ci.yml)
 
-Public runnable lab for **replay-safe care-ops SMS** — inspired by private HIPAA-bound production work at Ellipsis Health, rebuilt so engineering reviewers can click through without cloning.
+Clinical SMS fails when retries duplicate — agents make that worse. This is a **public rebuild** of the write-path invariants I shipped at Ellipsis Health (HIPAA-bound production code cannot be open-sourced): dedupe first, intelligence second.
 
-**Live demo:** https://care-ops-idempotency-demo.vercel.app _(UI on Vercel — wire API via [Deploy](#deploy-vercel--render--0mo) below)_
+**Live lab:** https://care-ops-idempotency-demo.vercel.app _(UI on Vercel — wire API via [Deploy](#deploy-vercel--render--0mo) below)_
 
 **Repository:** https://github.com/sondo-amoeba/care-ops-idempotency-demo
 
@@ -54,7 +54,7 @@ Browser
 
 See [docs/adr/](./docs/adr/) for decision records (outbox dedupe, inbound SID upsert, split-stack deploy, coordinator graph, multi-agent + RAG).
 
-## Demo walkthrough (5 minutes)
+## Guided invariant walkthrough (5 minutes)
 
 ### Tier 1 — Idempotency + agentic outbound (interview default)
 
@@ -198,7 +198,7 @@ Do **not** use Render's free Postgres — it expires after ~30 days.
 4. **Instance type:** Free
 5. Same env vars as above (`API_PORT=3001`, `NODE_ENV=production` are in `render.yaml` defaults).
 
-TypeORM `synchronize: true` applies schema on first boot (demo only).
+TypeORM `synchronize: true` applies schema on first boot (lab only).
 
 **Render free caveat:** services spin down after 15 min idle (~30–60s cold start). The [`keep-warm`](.github/workflows/keep-warm.yml) workflow pings every 10 min once the API is wired.
 
@@ -230,14 +230,14 @@ Keep-warm runs automatically on `main`. Disable it in Render dashboard if you su
 - No PHI, live Twilio, or HIPAA audit logging
 - Eligibility is program-level (not per-patient opt-out table)
 - NestJS monolith module layout (domain modules deferred)
-- `synchronize: true` for demo schema — use migrations in production
+- `synchronize: true` for lab schema — use migrations in production
 - Coordinator uses **mock model** in CI and by default on Render (set `GEMINI_API_KEY` for live Gemini; `GEMINI_MODEL` optional, default `gemini-2.5-flash` with fallback chain)
 - LangGraph + pgvector require Neon Postgres with `vector` extension enabled
 - Sanitized fake Twilio SIDs — not a Twilio integration test
 
 ## Disclaimer
 
-Fictional patient IDs only. This is an **illustrative lab**, not production Ellipsis or Solace code. No PHI, no live Twilio. Built as an engineering demo for job application review and interview walkthroughs.
+Fictional patient IDs only. Sanitized **public invariant lab** — not production Ellipsis code. No PHI, no live Twilio. Runnable reference architecture for replay-safe agentic care-ops SMS; you can verify the invariants in five minutes or read the ADRs and tests for depth.
 
 ## License
 

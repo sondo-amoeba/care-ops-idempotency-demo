@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Care-Ops SMS Idempotency Demo",
+  title: "Care-Ops SMS Invariant Lab",
   description:
-    "Sanitized demo of replay-safe Twilio webhook and outbound SMS idempotency patterns",
+    "Public rebuild of replay-safe care-ops SMS invariants — dedupe first, intelligence second",
 };
 
 export default function RootLayout({

@@ -92,7 +92,7 @@ export function WalkthroughGuide({ current, completed, tier2Unlocked }: Walkthro
   return (
     <section className="card border-primary/20 bg-blue-50/40">
       <p className="text-xs font-medium uppercase tracking-wide text-primary">
-        Demo walkthrough · you are the care coordinator
+        Guided invariant walkthrough · you are the care coordinator
       </p>
       <p className="mt-1 text-sm text-slate-700">
         A patient finished a voice visit. An AI care coordinator drafts a follow-up SMS — you

@@ -286,8 +286,12 @@ export default function CareAgentConsole() {
   return (
     <main className="mx-auto min-h-screen max-w-6xl p-6">
       <header className="mb-6">
-        <p className="text-sm font-medium text-primary">Sanitized public demo · no PHI</p>
+        <p className="text-sm font-medium text-primary">Public invariant lab · no PHI</p>
         <h1 className="text-2xl font-semibold">Care coordinator console</h1>
+        <p className="mt-1 max-w-2xl text-sm text-slate-600">
+          Clinical SMS fails when retries duplicate — agents make that worse. Dedupe first,
+          intelligence second.
+        </p>
         <p className="mt-2 text-xs text-slate-500">{metrics}</p>
       </header>
 
@@ -476,7 +480,7 @@ export default function CareAgentConsole() {
 
       <div className="mt-4 space-y-4">
         <CollapsibleSection
-          title="Stretch demo (Tier 2)"
+          title="Stretch lab (Tier 2)"
           subtitle="Lifecycle trigger and delivery callback — inbound YES/reschedule live in walkthrough steps 5–6."
         >
           <div className="flex flex-wrap gap-2">
@@ -553,7 +557,7 @@ export default function CareAgentConsole() {
           <h2 className="mb-2 font-semibold">Activity log</h2>
           <ul className="max-h-40 space-y-1 overflow-auto font-mono text-xs text-slate-600">
             {log.length === 0 ? (
-              <li className="text-slate-400">Actions appear here as you walk through the demo.</li>
+              <li className="text-slate-400">Actions appear here as you walk through the lab.</li>
             ) : (
               log.map((line, index) => <li key={`${line}-${index}`}>{line}</li>)
             )}

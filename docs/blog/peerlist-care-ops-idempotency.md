@@ -8,9 +8,9 @@
 
 **Peerlist summary (paste into editor):**
 
-Clinical care-ops programs send two-way SMS around voice visits. When Twilio replays a webhook, a queue redelivers, or an LLM coordinator retries, duplicate texts erode patient trust — in healthcare, a second “your appointment is tomorrow” is a program failure, not a nuisance. I couldn't open-source production code from Ellipsis Health, so I rebuilt the invariants as a public demo: inbound SID upserts, outbound outbox keys, a LangGraph coordinator with human-in-the-loop approval, and a 50× replay storm you can click through in five minutes.
+Clinical care-ops programs send two-way SMS around voice visits. When Twilio replays a webhook, a queue redelivers, or an LLM coordinator retries, duplicate texts erode patient trust — in healthcare, a second “your appointment is tomorrow” is a program failure, not a nuisance. I couldn't open-source production code from Ellipsis Health, so I rebuilt the invariants as a public lab: inbound SID upserts, outbound outbox keys, a LangGraph coordinator with human-in-the-loop approval, and a 50× replay storm you can click through in five minutes.
 
-**Live demo:** https://care-ops-idempotency-demo.vercel.app  
+**Live lab:** https://care-ops-idempotency-demo.vercel.app  
 **Repository:** https://github.com/sondo-amoeba/care-ops-idempotency-demo
 
 **Images:** Upload the three PNGs from `docs/blog/assets/` when publishing (Peerlist editor does not pull from GitHub automatically).
@@ -27,7 +27,7 @@ In clinical SMS programs, duplicate sends are not a minor UX annoyance. They are
 
 So I rebuilt the **architecture** publicly: a runnable lab where engineering reviewers can click through replay-safe SMS orchestration without cloning a private repo. The thesis is simple: **agents make retries worse**. Before you add LLM coordinators, webhook classifiers, or RAG retrieval, you need write-path invariants that survive concurrent replay. Intelligence comes after dedupe — never before.
 
-The live demo is here: [care-ops-idempotency-demo.vercel.app](https://care-ops-idempotency-demo.vercel.app). This post walks through what I shipped and why.
+The live lab is here: [care-ops-idempotency-demo.vercel.app](https://care-ops-idempotency-demo.vercel.app). This post walks through what I shipped and why.
 
 ## The failure modes that multiply under agents
 
@@ -38,7 +38,7 @@ Care-ops SMS sits at a messy intersection:
 - **Humans double-click.** Care coordinators approve, retry, or trigger sends from a console — often in the same clinical outreach window.
 - **Agent workflows add a new retry surface.** An LLM coordinator that observes state, plans an action, and proposes an outbound SMS will be invoked again on lifecycle signals, manual reruns, and test harnesses. Each invocation is another chance to duplicate a send.
 
-In production, the invariant target was duplicate delivery under 0.1%. The demo makes that visible: fire fifty identical outbound triggers and watch them collapse to one persisted row.
+In production, the invariant target was duplicate delivery under 0.1%. The lab makes that visible: fire fifty identical outbound triggers and watch them collapse to one persisted row.
 
 ## Three invariants before intelligence
 
@@ -147,7 +147,7 @@ flowchart TB
   SUP -->|lifecycle / manual| coord
 ```
 
-The split stack (Vercel for UI, Render for API, Neon for Postgres, Upstash for Redis) keeps the demo at $0/month while still feeling production-shaped. A GitHub Actions keep-warm workflow pings the API every ten minutes so Render free-tier cold starts do not ruin a live walkthrough.
+The split stack (Vercel for UI, Render for API, Neon for Postgres, Upstash for Redis) keeps the lab at $0/month while still feeling production-shaped. A GitHub Actions keep-warm workflow pings the API every ten minutes so Render free-tier cold starts do not ruin a live walkthrough.
 
 ## Agentic outbound — without bypassing the outbox
 
@@ -199,7 +199,7 @@ RAG is a shared read tool, not a conversational agent. Synthetic program policy 
 
 ## Proof: the replay storm
 
-The demo's hero moment is step 4 of the guided walkthrough: **50× replay storm**. The UI fires fifty concurrent identical outbound triggers — through the coordinator's approved execute path or the deterministic workflow orchestrator — and animates the results:
+The lab's hero moment is step 4 of the guided invariant walkthrough: **50× replay storm**. The UI fires fifty concurrent identical outbound triggers — through the coordinator's approved execute path or the deterministic workflow orchestrator — and animates the results:
 
 - Attempt ticks stagger in real time, driven by actual API responses
 - Duplicates flash amber and collapse
@@ -212,7 +212,7 @@ Vitest covers the same scenario under parallel load. A shell script (`scripts/re
 
 ## Five-minute walkthrough
 
-If you open the live demo, the console guides you through two tiers:
+If you open the live lab, the console guides you through two tiers:
 
 **Tier 1 (steps 1–4) — the five-minute pitch**
 
@@ -234,11 +234,11 @@ Transparency matters for a public lab:
 
 - No auth, multi-tenant programs, or real Twilio signature validation
 - No PHI, live Twilio, or HIPAA audit logging
-- `synchronize: true` for demo schema — migrations in production
+- `synchronize: true` for lab schema — migrations in production
 - Coordinator defaults to mock on Render unless `GEMINI_API_KEY` is set
 - Inbound classification is deterministic (keyword/regex), not LLM — Gemini applies only to outbound plan
 
-These cuts keep the demo deployable at $0 and the narrative focused. The architecture decisions (outbox authority, graph interrupt, SID-before-supervisor) are the parts that transfer to production.
+These cuts keep the lab deployable at $0 and the narrative focused. The architecture decisions (outbox authority, graph interrupt, SID-before-supervisor) are the parts that transfer to production.
 
 ## Closing
 
@@ -250,7 +250,7 @@ The order of operations I would recommend for any team adding agents to a messag
 4. **Prove invariants under load** — parallel replay tests, not just happy-path unit tests
 5. **Then** add coordinators, routers, and retrieval
 
-This repo is an illustrative lab, not production Ellipsis or Solace code. No PHI, no live Twilio. But the invariants are the ones I shipped against in private — rebuilt so you can break them in public and watch them hold.
+This repo is a sanitized public invariant lab — not production Ellipsis code. No PHI, no live Twilio. But the invariants are the ones I shipped against in private — rebuilt so you can break them in public and watch them hold.
 
 **Try it:** [care-ops-idempotency-demo.vercel.app](https://care-ops-idempotency-demo.vercel.app)  
 **Source:** [github.com/sondo-amoeba/care-ops-idempotency-demo](https://github.com/sondo-amoeba/care-ops-idempotency-demo)

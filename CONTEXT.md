@@ -1,4 +1,4 @@
-# Care-Ops Idempotency Demo — Glossary
+# Care-Ops SMS Invariant Lab — Glossary
 
 Domain language for this repo. Implementation details live in code and ADRs under `docs/adr/`.
 
@@ -189,9 +189,15 @@ Planned SMS depth work, in sequence: (1) Tier 2/3 walkthrough + supervisor/inbou
 
 The Next.js UI where a **Care coordinator** reviews patient episodes, approves AI-proposed SMS, and monitors message activity. Primary audience is a cold reviewer, not an engineer reading API docs.
 
-**Demo walkthrough**
+**Guided invariant walkthrough**
 
 The default first-run narrative on the console: voice visit ends → **AI care coordinator** proposes follow-up SMS → **Care coordinator** approves → replay storm proves idempotency. Tier 1 only; copy and layout lead with this story.
+
+_Avoid_: "Demo walkthrough" in UI copy — use **Guided invariant walkthrough**
+
+**Demo walkthrough**
+
+Deprecated label — same as **Guided invariant walkthrough**. Rename in UI and docs.
 
 **Walkthrough tier rows**
 
@@ -201,17 +207,19 @@ _Avoid_: Showing all six steps with equal prominence on cold load
 
 **Architecture lab**
 
-Secondary console region for implementation probes — manual outbound send, workflow orchestrator trigger, webhook replays, eligibility toggles. Visible but visually subordinate to the **Demo walkthrough**; never competes for attention on first load.
+Secondary console region for implementation probes — manual outbound send, workflow orchestrator trigger, webhook replays, eligibility toggles. Visible but visually subordinate to the **Guided invariant walkthrough**; never competes for attention on first load.
 
 _Avoid_: "Developer mode", "advanced settings" (implies product config, not demo depth)
 
-**Stretch demo**
+**Stretch lab**
 
-Optional Tier 2 controls on the console — lifecycle trigger, inbound patient reply, delivery status callback. Collapsed by default beneath the **Demo walkthrough**; expands for reviewers who want the full stack narrative.
+Optional Tier 2 controls on the console — lifecycle trigger, inbound patient reply, delivery status callback. Collapsed by default beneath the **Guided invariant walkthrough**; expands for reviewers who want the full stack narrative.
+
+_Avoid_: "Stretch demo"
 
 **Walkthrough step**
 
-One numbered stage in the **Demo walkthrough**. Steps are visually highlighted in order but never hard-locked — reviewers may skip ahead. Tier 1: start episode → AI proposes SMS → care coordinator approves → replay storm. Tier 2/3 (planned): patient confirms YES → patient requests reschedule (supervisor + inbound router graphs).
+One numbered stage in the **Guided invariant walkthrough**. Steps are visually highlighted in order but never hard-locked — reviewers may skip ahead. Tier 1: start episode → AI proposes SMS → care coordinator approves → replay storm. Tier 2/3 (planned): patient confirms YES → patient requests reschedule (supervisor + inbound router graphs).
 
 ## Voice workflow phase
 
@@ -265,6 +273,16 @@ Secondary Tier 4 workflow in this repo — mirrors Ellipsis Vapi HITL edit: webh
 
 _Avoid_: "Vapi demo", "voice edit tab" in glossary — use **Completed call edit**
 
+## Public invariant lab
+
+Public rebuild of production write-path invariants from Ellipsis care-ops SMS — runnable because the HIPAA-bound codebase cannot be open-sourced. Serves two jobs: (1) **Interview proof** — a cold reviewer can verify idempotency claims in five minutes; (2) **Reference implementation** — appendix to blog and talks teaching replay-safe agentic care-ops.
+
+**Public one-liner (balanced):** Clinical SMS fails when retries duplicate — agents make that worse. Public rebuild of the invariants shipped at Ellipsis: dedupe first, intelligence second.
+
+Employer names (e.g. Solace) belong in application materials, not in repo branding.
+
+_Avoid_: "demo app", "portfolio project", "toy" — use **Public invariant lab** or **reference architecture**
+
 ## Application code sample
 
-(Inherited from resume-workspace `CONTEXT.md`.) Public runnable demo linked from job applications when a proprietary production story needs a reviewer-facing artifact. This repo is that artifact for Ellipsis/Solace care-ops SMS idempotency.
+(Synonym for **Public invariant lab** in resume-workspace harness docs.) Linked from job applications when a proprietary production story needs a reviewer-facing artifact.

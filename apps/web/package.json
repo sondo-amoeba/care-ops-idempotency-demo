@@ -1,6 +1,7 @@
 {
   "name": "@care-ops/web",
   "version": "1.0.0",
+  "description": "Care coordinator console for the Care-Ops SMS Invariant Lab",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",

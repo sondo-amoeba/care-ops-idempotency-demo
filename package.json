@@ -1,5 +1,6 @@
 {
   "name": "care-ops-idempotency-demo",
+  "description": "Public invariant lab — replay-safe care-ops SMS (dedupe first, intelligence second)",
   "private": true,
   "scripts": {
     "dev": "pnpm -r --parallel dev",
