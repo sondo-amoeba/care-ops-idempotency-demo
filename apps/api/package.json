@@ -8,7 +8,9 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "migration:run": "nest build && node ./node_modules/typeorm/cli.js migration:run -d dist/database/data-source.js",
+    "migration:revert": "node ./node_modules/typeorm/cli.js migration:revert -d dist/database/data-source.js"
   },
   "dependencies": {
     "@langchain/core": "^1.2.1",

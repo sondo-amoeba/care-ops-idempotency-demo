@@ -11,10 +11,10 @@ import {
   buildIdempotencyKey,
   fakeTwilioSid,
   hourWindowStart,
+  localPendingSid,
 } from "../common/idempotency.util";
 import { EligibilityService } from "../eligibility/eligibility.service";
 import { Interaction, SmsMessage, SmsOutbox } from "../entities";
-import { InteractionService } from "../interactions/interaction.service";
 import { RedisService } from "../redis/redis.service";
 
 export interface SendSmsInput {
@@ -25,6 +25,15 @@ export interface SendSmsInput {
   body: string;
   source: "care_agent" | "agent_workflow" | "ai_coordinator";
   windowStart?: string;
+  resendKey?: string;
+}
+
+export interface SendSmsResult {
+  duplicate: boolean;
+  outbox: SmsOutbox;
+  message: SmsMessage | null;
+  idempotencyKey: string;
+  carrierSubmitted: boolean;
 }
 
 @Injectable()
@@ -37,7 +46,6 @@ export class SmsService {
     @InjectRepository(Interaction)
     private readonly interactionRepo: Repository<Interaction>,
     @Inject(EligibilityService) private readonly eligibility: EligibilityService,
-    @Inject(InteractionService) private readonly interactions: InteractionService,
     @Inject(RedisService) private readonly redis: RedisService,
   ) {}
 
@@ -92,7 +100,7 @@ export class SmsService {
     return { updated: true, message };
   }
 
-  async sendOutbound(input: SendSmsInput) {
+  async sendOutbound(input: SendSmsInput): Promise<SendSmsResult> {
     const eligibility = await this.eligibility.canContact(
       input.patientId,
       input.programId,
@@ -108,13 +116,14 @@ export class SmsService {
       input.interactionId,
       input.templateId,
       windowStart,
+      input.resendKey,
     );
 
     const existingOutbox = await this.outboxRepo.findOne({
       where: { idempotencyKey },
     });
     if (existingOutbox) {
-      return this.buildDuplicateSendResult(idempotencyKey);
+      return this.buildDuplicateSendResult(idempotencyKey, existingOutbox);
     }
 
     const allowed = await this.redis.checkRateLimit(
@@ -126,85 +135,160 @@ export class SmsService {
       throw new ConflictException("rate_limit_exceeded");
     }
 
-    const twilioMessageSid = fakeTwilioSid("out", idempotencyKey);
-    const inserted = await this.tryInsertOutbox({
+    const claimed = await this.claimOutboundLedger({
       idempotencyKey,
       interactionId: input.interactionId,
       templateId: input.templateId,
       body: input.body,
-      twilioMessageSid,
       source: input.source,
     });
 
-    if (!inserted) {
-      return this.buildDuplicateSendResult(idempotencyKey);
+    if (!claimed) {
+      const racedOutbox = await this.outboxRepo.findOne({
+        where: { idempotencyKey },
+      });
+      if (!racedOutbox) {
+        throw new ConflictException("outbox_race_retry");
+      }
+      return this.buildDuplicateSendResult(idempotencyKey, racedOutbox);
     }
 
-    const message = await this.messageRepo.save(
-      this.messageRepo.create({
-        interactionId: input.interactionId,
-        twilioMessageSid,
-        direction: "outbound",
-        body: input.body,
-        status: "queued",
-        source: input.source,
+    const carrier = await this.submitToCarrier({ idempotencyKey, body: input.body });
+    if (!carrier.ok) {
+      await this.markSubmissionFailed(idempotencyKey, carrier.reason);
+      const outbox = await this.outboxRepo.findOneOrFail({
+        where: { idempotencyKey },
+      });
+      const message = await this.messageRepo.findOne({
+        where: { idempotencyKey },
+      });
+      return {
+        duplicate: false,
+        outbox,
+        message,
         idempotencyKey,
-      }),
-    );
+        carrierSubmitted: false,
+      };
+    }
 
+    await this.markSubmitted(idempotencyKey, carrier.messageSid);
     const outbox = await this.outboxRepo.findOneOrFail({
       where: { idempotencyKey },
     });
+    const message = await this.messageRepo.findOneOrFail({
+      where: { idempotencyKey },
+    });
 
-    return { duplicate: false, outbox, message, idempotencyKey };
+    return {
+      duplicate: false,
+      outbox,
+      message,
+      idempotencyKey,
+      carrierSubmitted: true,
+    };
   }
 
-  /** INSERT … ON CONFLICT DO NOTHING — safe under concurrent replay. */
-  private async tryInsertOutbox(values: {
+  /**
+   * Ledger-first: outbox + message rows in one transaction before any carrier call.
+   */
+  private async claimOutboundLedger(values: {
     idempotencyKey: string;
     interactionId: string;
     templateId: string;
     body: string;
-    twilioMessageSid: string;
     source: string;
   }): Promise<boolean> {
-    const rows: Array<{ id: string }> = await this.outboxRepo.manager.query(
-      `
-        INSERT INTO sms_outbox
-          ("idempotencyKey", "interactionId", "templateId", body, status, "twilioMessageSid", source)
-        VALUES ($1, $2, $3, $4, 'sent', $5, $6)
-        ON CONFLICT ("idempotencyKey") DO NOTHING
-        RETURNING id
-      `,
-      [
-        values.idempotencyKey,
-        values.interactionId,
-        values.templateId,
-        values.body,
-        values.twilioMessageSid,
-        values.source,
-      ],
-    );
-    return rows.length > 0;
+    const pendingSid = localPendingSid(values.idempotencyKey);
+
+    return this.outboxRepo.manager.transaction(async (tx) => {
+      const outboxRows: Array<{ id: string }> = await tx.query(
+        `
+          INSERT INTO sms_outbox
+            ("idempotencyKey", "interactionId", "templateId", body, status, source)
+          VALUES ($1, $2, $3, $4, 'pending', $5)
+          ON CONFLICT ("idempotencyKey") DO NOTHING
+          RETURNING id
+        `,
+        [
+          values.idempotencyKey,
+          values.interactionId,
+          values.templateId,
+          values.body,
+          values.source,
+        ],
+      );
+
+      if (outboxRows.length === 0) {
+        return false;
+      }
+
+      await tx.query(
+        `
+          INSERT INTO sms_messages
+            ("interactionId", "twilioMessageSid", direction, body, status, source, "idempotencyKey")
+          VALUES ($1, $2, 'outbound', $3, 'pending', $4, $5)
+        `,
+        [
+          values.interactionId,
+          pendingSid,
+          values.body,
+          values.source,
+          values.idempotencyKey,
+        ],
+      );
+
+      return true;
+    });
   }
 
-  private async buildDuplicateSendResult(idempotencyKey: string) {
-    const existingOutbox = await this.outboxRepo.findOne({
+  private async submitToCarrier(input: {
+    idempotencyKey: string;
+    body: string;
+  }): Promise<{ ok: true; messageSid: string } | { ok: false; reason: string }> {
+    if (process.env.SMS_SIMULATE_SUBMISSION_FAILURE === "true") {
+      return { ok: false, reason: "simulated_carrier_failure" };
+    }
+
+    void input.body;
+    return {
+      ok: true,
+      messageSid: fakeTwilioSid("out", input.idempotencyKey),
+    };
+  }
+
+  private async markSubmitted(idempotencyKey: string, twilioMessageSid: string) {
+    await this.outboxRepo.update(
+      { idempotencyKey },
+      { status: "submitted", twilioMessageSid },
+    );
+    await this.messageRepo.update(
+      { idempotencyKey },
+      { status: "queued", twilioMessageSid },
+    );
+  }
+
+  private async markSubmissionFailed(idempotencyKey: string, reason: string) {
+    await this.outboxRepo.update({ idempotencyKey }, { status: "submission_failed" });
+    await this.messageRepo.update(
+      { idempotencyKey },
+      { status: "submission_failed" },
+    );
+    void reason;
+  }
+
+  private async buildDuplicateSendResult(
+    idempotencyKey: string,
+    existingOutbox: SmsOutbox,
+  ): Promise<SendSmsResult> {
+    const existingMessage = await this.messageRepo.findOne({
       where: { idempotencyKey },
     });
-    if (!existingOutbox) {
-      throw new ConflictException("outbox_race_retry");
-    }
-    const existingMessage = existingOutbox.twilioMessageSid
-      ? await this.messageRepo.findOne({
-          where: { twilioMessageSid: existingOutbox.twilioMessageSid },
-        })
-      : null;
     return {
       duplicate: true,
       outbox: existingOutbox,
       message: existingMessage,
       idempotencyKey,
+      carrierSubmitted: existingOutbox.status === "submitted",
     };
   }
 

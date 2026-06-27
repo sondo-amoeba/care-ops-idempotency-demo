@@ -4,11 +4,16 @@ export function buildIdempotencyKey(
   interactionId: string,
   templateId: string,
   windowStart: string,
+  resendKey?: string,
 ): string {
-  return createHash("sha256")
-    .update(`${interactionId}:${templateId}:${windowStart}`)
-    .digest("hex")
-    .slice(0, 32);
+  const scope = resendKey
+    ? `${interactionId}:${templateId}:${windowStart}:resend:${resendKey}`
+    : `${interactionId}:${templateId}:${windowStart}`;
+  return createHash("sha256").update(scope).digest("hex").slice(0, 32);
+}
+
+export function localPendingSid(idempotencyKey: string): string {
+  return `LP${idempotencyKey}`;
 }
 
 export function hourWindowStart(iso?: string): string {

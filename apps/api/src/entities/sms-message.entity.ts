@@ -12,10 +12,12 @@ import { Interaction } from "./interaction.entity";
 
 export type SmsDirection = "inbound" | "outbound";
 export type SmsDeliveryStatus =
+  | "pending"
   | "queued"
   | "sent"
   | "delivered"
   | "failed"
+  | "submission_failed"
   | "received";
 
 @Entity("sms_messages")

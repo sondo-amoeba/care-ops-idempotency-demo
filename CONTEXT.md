@@ -22,9 +22,41 @@ Appointment record tied to an interaction. Moves to `confirmed` when the patient
 
 Twilio-style webhook handler that upserts on `twilio_message_sid`. Replays update the existing row and return `duplicate: true` without inserting a second message.
 
+## Inbound thread resolution
+
+How an inbound webhook attaches a message to the correct **Interaction** when Twilio sends `From`/`To`/`Body` but not `interactionId`.
+
+| Mode | When | Behavior |
+|------|------|----------|
+| **Production path** | Twilio sandbox and operable-reference deploy | `From` (E.164) → lookup single **open** interaction for that phone + program line; SID upsert runs before routing |
+| **Dev override** | Staging, Vitest fixtures | Optional `interactionId` in body or header — skips phone lookup for deterministic tests |
+
+**Ambiguity rule:** multiple open threads for same phone → attach to most recent `last_activity_at`; log `interaction_resolution=ambiguous`; metric for ops review — never fork to two threads silently.
+
+**Operable-reference cut:** one sandbox Twilio number maps to one `program_id`; org-wide number routing stays in the staff narrative only.
+
 ## Outbound idempotency
 
 Deterministic `idempotency_key` = hash(interaction + template + hour window). Outbox insert uses `ON CONFLICT DO NOTHING` so concurrent replays collapse to one row.
+
+## Outbound write contract
+
+The ordering rule for operable-reference outbound sends: **ledger-first, carrier-second**. Dedupe wins in Postgres before any Twilio REST call; the carrier is never contacted until the outbox insert succeeds.
+
+## Submission lifecycle
+
+States an outbound SMS passes through after the write contract applies:
+
+| State | Meaning |
+|-------|---------|
+| **pending** | Outbox + message rows exist locally; Twilio not yet called |
+| **submitted** | Twilio accepted; real `MessageSid` stored |
+| **submission_failed** | Twilio rejected or timed out after dedupe won; same idempotency key returns this row — no silent carrier retry |
+| **delivered** / **failed** | Terminal delivery states from status callback only (update-existing-row) |
+
+## Explicit resend
+
+A new carrier attempt after **submission_failed** or an intentional resend — requires a new idempotency scope (next hour window or operator-supplied resend key). Never reuses the original key to hit Twilio twice.
 
 ## Outbox
 
@@ -59,6 +91,10 @@ Structured output from the AI care coordinator: recommended action, draft SMS bo
 ## Approval gate
 
 Mandatory human checkpoint before any AI-proposed outbound SMS executes. The care coordinator approves or rejects; only approval invokes the idempotent outbound path.
+
+## Idempotent approve
+
+The approve endpoint contract: `POST …/approve` is replay-safe per `runId`. First call wins a compare-and-swap on `proposal.status` (`pending` → `approved`) and executes send; replays and concurrent losers return **200** with the same `sendResult` (`duplicate: true` when outbox already won) — never a spurious 400. The outbox is the second line of defense, not the first.
 
 ## Coordinator run
 
@@ -263,9 +299,33 @@ Dark slate hero region (`#0f172a`) housing **Coordinator graph view** or **Repla
 
 Twilio delivery webhook path that updates an existing message row only. Never inserts a new message on late `delivered` / `failed` events.
 
+## Trust zone
+
+An auth boundary that maps an actor type to a credential class. Operable reference uses three zones — never one shared secret for all routes.
+
+| Zone | Actor | Credential |
+|------|-------|------------|
+| **Partner webhook** | Twilio | Request signature on `/webhooks/twilio/*` |
+| **Orchestrator** | Workflow orchestrator, lifecycle automation | Service token on programmatic send/trigger paths |
+| **Care coordinator** | Human operator in the console | Coordinator JWT on reply, approve/reject, thread read, eligibility admin |
+
+Orchestrator and care-coordinator zones both invoke the same idempotent outbound module — auth differs; write path does not.
+
 ## Replay storm
 
 Demo scenario firing dozens of identical outbound triggers to prove duplicate delivery stays at one persisted row.
+
+## Duplicate attempt rate
+
+SLO numerator/denominator for the **idempotency layer**: blocked outbox conflicts (`ON CONFLICT DO NOTHING`) over total send attempts. Proves replay collapse — replay storm and CI gate metric. A spike here signals bad client retry policy, not necessarily patient-facing duplicate texts.
+
+## Duplicate delivery rate
+
+SLO numerator/denominator for **carrier truth**: outbound rows with two distinct real MessageSids for the same clinical intent (same interaction + template + hour window) over total carrier-delivered messages. Target **under 0.1%** (T-M2). Page-worthy — actual program failure.
+
+## SLO reconcile
+
+Scheduled job comparing local outbox/message rows against Twilio sandbox REST history to compute **duplicate delivery rate**. Writes snapshots for dashboard audit; complements real-time **duplicate attempt rate**.
 
 ## Completed call edit
 
@@ -276,6 +336,14 @@ _Avoid_: "Vapi demo", "voice edit tab" in glossary — use **Completed call edit
 ## Public invariant lab
 
 Public rebuild of production write-path invariants from Ellipsis care-ops SMS — runnable because the HIPAA-bound codebase cannot be open-sourced. Serves two jobs: (1) **Interview proof** — a cold reviewer can verify idempotency claims in five minutes; (2) **Reference implementation** — appendix to blog and talks teaching replay-safe agentic care-ops.
+
+## Operable reference
+
+The elevated state of the **Public invariant lab** — still sanitized (no PHI), but production-operable: migrations, ledger-first Twilio sandbox, split **Trust zones**, tiered SLOs with reconcile, idempotent approve, production-style **Inbound thread resolution**, runbook, and CI gates. Distinct from a deployable multi-tenant SaaS or from private Ellipsis production code.
+
+## Staff narrative pack
+
+Written Track-2 artifacts that prove platform and ops ownership without overclaiming private production code: `interaction-id` platform RFC, org-scale rollout phases, on-call runbook, and lab↔production mapping in README — synced to interview prep terminology.
 
 **Public one-liner (balanced):** Clinical SMS fails when retries duplicate — agents make that worse. Public rebuild of the invariants shipped at Ellipsis: dedupe first, intelligence second.
 

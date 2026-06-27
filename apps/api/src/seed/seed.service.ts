@@ -69,11 +69,6 @@ export class SeedService implements OnModuleInit {
     }
 
     try {
-      await this.dataSource.query("CREATE EXTENSION IF NOT EXISTS vector");
-      await this.dataSource.query(`
-        ALTER TABLE care_context_chunks
-        ADD COLUMN IF NOT EXISTS embedding vector(1536)
-      `);
       const chunks = await this.chunkRepo.find({
         where: { programId: "behavioral-health-outreach" },
       });

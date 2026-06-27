@@ -28,6 +28,7 @@ import { SmsService } from "./sms/sms.service";
 import { RedisService } from "./redis/redis.service";
 import { CareContextService } from "./rag/care-context.service";
 import { SeedService } from "./seed/seed.service";
+import { InitialSchema1730000000001 } from "./database/migrations/1730000000001-InitialSchema";
 
 const entities = [
   Interaction,
@@ -51,7 +52,9 @@ function databaseConfig() {
       url,
       ssl: process.env.POSTGRES_SSL === "false" ? false : { rejectUnauthorized: false },
       entities,
-      synchronize: true,
+      synchronize: false,
+      migrations: [InitialSchema1730000000001],
+      migrationsRun: true,
     };
   }
   return {
@@ -62,7 +65,9 @@ function databaseConfig() {
     password: process.env.POSTGRES_PASSWORD ?? "careops",
     database: process.env.POSTGRES_DB ?? "careops_demo",
     entities,
-    synchronize: true,
+    synchronize: false,
+    migrations: [InitialSchema1730000000001],
+    migrationsRun: true,
   };
 }
 

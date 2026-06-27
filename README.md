@@ -20,7 +20,7 @@ Production code was private. This repo shows the **invariants and architecture**
 |------------|-----------------|
 | **Unified thread model** | `interaction_id` links care thread, voice session, booking, and SMS messages |
 | **Inbound idempotency** | Twilio webhook upsert on `twilio_message_sid` (UNIQUE) — replays return `duplicate: true` |
-| **Outbound idempotency** | SHA256 key over interaction + template + hour window; `INSERT … ON CONFLICT DO NOTHING` on outbox |
+| **Outbound idempotency** | SHA256 key over interaction + template + hour window (+ optional `resendKey`); transactional outbox + message `pending`, then carrier submit |
 | **Status callbacks** | Update-only — no new rows on late delivery events; **Simulate delivery callback** in UI |
 | **Eligibility gates** | `canContact()` before outbound send; scheduling rule gates inbound YES → confirm |
 | **Inbound orchestration** | Patient replies YES → booking confirmed, voice completed, thread resolved |
@@ -48,7 +48,7 @@ Browser
 ```
 
 **Inbound path:** `POST /webhooks/twilio/inbound` → SID upsert → supervisor → inbound router (intent)  
-**Outbound path:** eligibility → rate limit → outbox insert (conflict-safe) → message row  
+**Outbound path:** eligibility → rate limit → transactional outbox + message (`pending`) → carrier submit → `submitted`/`submission_failed`
 **Coordinator path:** LangGraph observe → RAG → plan → propose → **HITL approve** → idempotent execute  
 **Legacy agent path:** `POST /care-ops/agent-workflow/trigger-sms` → same outbound module (non-LLM)
 
@@ -79,14 +79,30 @@ git clone https://github.com/sondo-amoeba/care-ops-idempotency-demo.git
 cd care-ops-idempotency-demo
 cp .env.example .env
 cp apps/web/.env.example apps/web/.env.local
-docker compose up -d postgres redis
 pnpm install
+bash scripts/start-local-services.sh    # Docker if available, else micromamba
+```
+
+`start-local-services.sh` starts Postgres (port **5433**) and Redis (port **6380**). It prefers **Docker Compose** when the daemon is reachable; otherwise it uses a **micromamba** env (`careops`) with PostgreSQL, pgvector, and redis-server — no sudo required.
+
+```bash
+# Force a backend
+bash scripts/start-local-services.sh docker
+bash scripts/start-local-services.sh micromamba
+bash scripts/start-local-services.sh status
+bash scripts/start-local-services.sh stop
+```
+
+After start, export the env vars the script prints (or use Docker Compose directly):
+
+```bash
+export POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=5433 POSTGRES_USER=careops \
+  POSTGRES_DB=careops_demo REDIS_URL=redis://localhost:6380
 ```
 
 **Terminal 1 — API (:3001):**
 
 ```bash
-export POSTGRES_PORT=5433 REDIS_URL=redis://localhost:6380
 pnpm --filter @care-ops/api dev
 ```
 
@@ -100,15 +116,14 @@ Open http://localhost:3000
 
 ## Tests
 
-Requires Postgres + Redis (`docker compose up -d postgres redis`):
+Requires Postgres + Redis (`bash scripts/start-local-services.sh`):
 
 ```bash
-export POSTGRES_PORT=5433 REDIS_URL=redis://localhost:6380
 pnpm test
-bash scripts/replay-storm.sh
+bash scripts/replay-storm.sh   # API must be running on :3001 for shell script
 ```
 
-Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, YES confirmation orchestration, 100× agent-workflow storm, **coordinator graph + HITL + Gemini fallback**, inbound intent routing, RAG trace events, and Gemini planner unit tests (24 tests).
+Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, submission_failed + resendKey, YES confirmation orchestration, 100× agent-workflow storm, **coordinator graph + HITL + Gemini fallback**, inbound intent routing, RAG trace events, and Gemini planner unit tests (27 tests).
 
 Set `COORDINATOR_MODEL_MODE=mock` (default when no `GEMINI_API_KEY`) for deterministic CI. Optional `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) enables live Gemini planning (free tier, no card).
 
@@ -198,7 +213,7 @@ Do **not** use Render's free Postgres — it expires after ~30 days.
 4. **Instance type:** Free
 5. Same env vars as above (`API_PORT=3001`, `NODE_ENV=production` are in `render.yaml` defaults).
 
-TypeORM `synchronize: true` applies schema on first boot (lab only).
+TypeORM migrations apply schema on first boot (`migrationsRun: true`).
 
 **Render free caveat:** services spin down after 15 min idle (~30–60s cold start). The [`keep-warm`](.github/workflows/keep-warm.yml) workflow pings every 10 min once the API is wired.
 
@@ -226,11 +241,12 @@ Keep-warm runs automatically on `main`. Disable it in Render dashboard if you su
 
 ## Tradeoffs and v1 cuts
 
-- No auth, multi-tenant programs, or real Twilio signature validation
-- No PHI, live Twilio, or HIPAA audit logging
+- No auth, multi-tenant programs, or real Twilio signature validation (phase 3)
+- No PHI, live Twilio REST, or HIPAA audit logging (phase 2 uses sandbox next)
 - Eligibility is program-level (not per-patient opt-out table)
 - NestJS monolith module layout (domain modules deferred)
-- `synchronize: true` for lab schema — use migrations in production
+- **Schema:** TypeORM migrations on boot (`migrationsRun: true`) — no `synchronize`
+- **Outbound path:** ledger-first write contract — transactional outbox + message `pending`, simulated carrier submit, `submission_failed` + `resendKey` for explicit retry
 - Coordinator uses **mock model** in CI and by default on Render (set `GEMINI_API_KEY` for live Gemini; `GEMINI_MODEL` optional, default `gemini-2.5-flash` with fallback chain)
 - LangGraph + pgvector require Neon Postgres with `vector` extension enabled
 - Sanitized fake Twilio SIDs — not a Twilio integration test

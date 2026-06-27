@@ -32,6 +32,10 @@ class SendSmsDto {
   @IsOptional()
   @IsString()
   windowStart?: string;
+
+  @IsOptional()
+  @IsString()
+  resendKey?: string;
 }
 
 class AgentWorkflowDto {
@@ -49,6 +53,14 @@ class AgentWorkflowDto {
 
   @IsString()
   body!: string;
+
+  @IsOptional()
+  @IsString()
+  windowStart?: string;
+
+  @IsOptional()
+  @IsString()
+  resendKey?: string;
 }
 
 class UpsertRuleDto {
