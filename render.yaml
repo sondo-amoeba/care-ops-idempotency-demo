@@ -17,6 +17,10 @@ services:
         value: "3001"
       - key: NODE_ENV
         value: production
+      # ADR-0006 relay. Off keeps the hosted demo's "Drain outbox relay" button
+      # meaningful (reviewer drives each step). Set "true" to autodrain instead.
+      - key: OUTBOX_RELAY_AUTODRAIN
+        value: "false"
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL

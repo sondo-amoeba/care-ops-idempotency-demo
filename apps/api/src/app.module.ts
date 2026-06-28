@@ -28,7 +28,11 @@ import { SmsService } from "./sms/sms.service";
 import { RedisService } from "./redis/redis.service";
 import { CareContextService } from "./rag/care-context.service";
 import { SeedService } from "./seed/seed.service";
+import { CarrierClient } from "./carrier/carrier.client";
+import { RelayService } from "./relay/relay.service";
+import { RelayController } from "./relay/relay.controller";
 import { InitialSchema1730000000001 } from "./database/migrations/1730000000001-InitialSchema";
+import { OutboxRelay1730000000002 } from "./database/migrations/1730000000002-OutboxRelay";
 
 const entities = [
   Interaction,
@@ -53,7 +57,7 @@ function databaseConfig() {
       ssl: process.env.POSTGRES_SSL === "false" ? false : { rejectUnauthorized: false },
       entities,
       synchronize: false,
-      migrations: [InitialSchema1730000000001],
+      migrations: [InitialSchema1730000000001, OutboxRelay1730000000002],
       migrationsRun: true,
     };
   }
@@ -66,19 +70,26 @@ function databaseConfig() {
     database: process.env.POSTGRES_DB ?? "careops_demo",
     entities,
     synchronize: false,
-    migrations: [InitialSchema1730000000001],
+    migrations: [InitialSchema1730000000001, OutboxRelay1730000000002],
     migrationsRun: true,
   };
 }
 
 @Module({
   imports: [TypeOrmModule.forRoot(databaseConfig()), TypeOrmModule.forFeature(entities)],
-  controllers: [CareOpsController, WebhooksController, CoordinatorController],
+  controllers: [
+    CareOpsController,
+    WebhooksController,
+    CoordinatorController,
+    RelayController,
+  ],
   providers: [
     EligibilityService,
     InteractionService,
     SmsService,
     RedisService,
+    CarrierClient,
+    RelayService,
     SeedService,
     CareContextService,
     GeminiCoordinatorPlanner,

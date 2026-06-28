@@ -6,3 +6,7 @@ dist
 coverage
 *.log
 .vercel
+
+# build / runtime artifacts
+*.tsbuildinfo
+dump.rdb

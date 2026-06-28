@@ -45,22 +45,57 @@ The ordering rule for operable-reference outbound sends: **ledger-first, carrier
 
 ## Submission lifecycle
 
-States an outbound SMS passes through after the write contract applies:
+States an outbound SMS passes through after the write contract applies. Submission is **relay-owned** (ADR-0006): the request path writes `pending` and returns; the **Outbox relay** is the only caller of the carrier.
 
 | State | Meaning |
 |-------|---------|
-| **pending** | Outbox + message rows exist locally; Twilio not yet called |
-| **submitted** | Twilio accepted; real `MessageSid` stored |
-| **submission_failed** | Twilio rejected or timed out after dedupe won; same idempotency key returns this row — no silent carrier retry |
+| **pending** | Outbox + message rows exist locally; carrier not yet called. The relay's claim target. |
+| **submitting** | Relay has claimed the row (`FOR UPDATE SKIP LOCKED`) and is mid carrier call. Stranded `submitting` rows are recovered by the **Reaper**. |
+| **submitted** | Carrier accepted; real `MessageSid` stored |
+| **submission_failed** | Legacy inline state (pre-relay). Under the relay, retryable carrier errors return to **pending** with backoff; terminal errors go to **dead_letter** |
+| **dead_letter** | Terminal: `attempts` exhausted (5) or a non-retryable carrier error (4xx). Surfaced for human action — never silently dropped |
 | **delivered** / **failed** | Terminal delivery states from status callback only (update-existing-row) |
+
+**Retry vs resend (ADR-0006 amends ADR-0001):** the relay retries the **same idempotency key** for transient carrier faults — same intent, still exactly-once. An operator **Explicit resend** is a *new* intent and still requires a new `resendKey` scope. Retry the same key for faults; never reuse a key to send a different message.
 
 ## Explicit resend
 
-A new carrier attempt after **submission_failed** or an intentional resend — requires a new idempotency scope (next hour window or operator-supplied resend key). Never reuses the original key to hit Twilio twice.
+A new carrier attempt after a **dead_letter** (or `submission_failed` legacy) row, or an intentional resend — requires a new idempotency scope (next hour window or operator-supplied resend key). Distinct from the relay's automatic **retry**, which reuses the same key for transient faults (same intent). An explicit resend is a *new* intent and never reuses the original key to hit the carrier twice.
 
 ## Outbox
 
 `sms_outbox` ledger row created before the outbound `sms_messages` row. The unique idempotency key is the dedupe authority for sends.
+
+## Outbox relay
+
+The worker that drains the **Outbox** out-of-band and is the **sole caller of the carrier** (ADR-0006). Claims `pending` rows with `SELECT … FOR UPDATE SKIP LOCKED`, flips them to `submitting` in the claim transaction, then submits outside the lock. `SKIP LOCKED` lets N relays run concurrently and provably never double-claim a row. Postgres stays the single source of truth — no second queue.
+
+The request path (`sendOutbound`) is **write-only**: it claims the ledger (`pending`) and returns. Carrier submission is the relay's job, never the request's.
+
+_Roadmap:_ `LISTEN/NOTIFY` on ledger insert wakes the relay on demand; the poll loop remains the durable fallback so a dropped notification never strands a row.
+
+_Avoid_: "outbox queue", "job worker" — it is a **relay** draining a ledger, not a queue consumer.
+
+## At-least-once carrier boundary
+
+The honest delivery limit (ADR-0006): the **system** is exactly-once, but **delivery to the carrier is at-least-once** unless the carrier itself dedupes. If the relay submits and crashes before writing `submitted`, the **Reaper** re-queues the row and it may re-submit — a duplicate handset message. We accept a rare carrier-side duplicate over a stranded clinical confirmation, and state that tradeoff plainly rather than pretend the SHA256 key reaches the handset.
+
+_Roadmap:_ push idempotency to the edge — carry the `idempotencyKey` and reconcile against carrier history before re-submitting.
+
+## Reaper
+
+Sweep that recovers rows stranded in **submitting** (relay crashed mid carrier call). Re-queues rows older than a timeout back to `pending` for another claim. The recovery half of the **At-least-once carrier boundary**.
+
+## Carrier MPS bucket
+
+Redis token-bucket owned by the **Outbox relay**, sized to the carrier's account-level messages-per-second ceiling — **distinct** from the per-interaction limiter (ADR-0006).
+
+| Limiter | Invariant | Lives in |
+|---------|-----------|----------|
+| Per-interaction (`send:${interactionId}`) | fairness / abuse — one thread can't spam one patient | request path |
+| Carrier MPS bucket | carrier contract — total send rate ≤ account MPS | relay |
+
+Empty bucket → relay claims nothing this tick; rows stay `pending` (safe, the outbox is durable). The per-interaction limiter's `INCR`-then-`EXPIRE` is two round-trips — a crash between them leaks a never-expiring key and wedges that interaction; replaced with an atomic Lua script.
 
 ## Eligibility gate
 
