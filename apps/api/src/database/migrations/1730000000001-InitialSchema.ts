@@ -14,7 +14,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "interactions" (
+      CREATE TABLE IF NOT EXISTS "interactions" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "patientId" character varying(64) NOT NULL,
         "programId" character varying(64) NOT NULL,
@@ -24,7 +24,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "care_threads" (
+      CREATE TABLE IF NOT EXISTS "care_threads" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "interactionId" uuid NOT NULL,
         "status" character varying(32) NOT NULL DEFAULT 'open',
@@ -37,7 +37,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "voice_sessions" (
+      CREATE TABLE IF NOT EXISTS "voice_sessions" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "interactionId" uuid NOT NULL,
         "externalCallId" character varying(64),
@@ -51,7 +51,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "bookings" (
+      CREATE TABLE IF NOT EXISTS "bookings" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "interactionId" uuid NOT NULL,
         "scheduledAt" TIMESTAMP WITH TIME ZONE,
@@ -65,7 +65,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "sms_outbox" (
+      CREATE TABLE IF NOT EXISTS "sms_outbox" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "idempotencyKey" character varying(128) NOT NULL,
         "interactionId" uuid NOT NULL,
@@ -80,11 +80,11 @@ export class InitialSchema1730000000001 implements MigrationInterface {
       )
     `);
     await queryRunner.query(
-      `CREATE INDEX "IDX_sms_outbox_interactionId" ON "sms_outbox" ("interactionId")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_sms_outbox_interactionId" ON "sms_outbox" ("interactionId")`,
     );
 
     await queryRunner.query(`
-      CREATE TABLE "sms_messages" (
+      CREATE TABLE IF NOT EXISTS "sms_messages" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "interactionId" uuid NOT NULL,
         "twilioMessageSid" character varying(64) NOT NULL,
@@ -102,14 +102,14 @@ export class InitialSchema1730000000001 implements MigrationInterface {
       )
     `);
     await queryRunner.query(
-      `CREATE INDEX "IDX_sms_messages_interactionId" ON "sms_messages" ("interactionId")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_sms_messages_interactionId" ON "sms_messages" ("interactionId")`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_sms_messages_idempotencyKey" ON "sms_messages" ("idempotencyKey")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_sms_messages_idempotencyKey" ON "sms_messages" ("idempotencyKey")`,
     );
 
     await queryRunner.query(`
-      CREATE TABLE "eligibility_rules" (
+      CREATE TABLE IF NOT EXISTS "eligibility_rules" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "programId" character varying(64) NOT NULL,
         "channel" character varying(32) NOT NULL,
@@ -122,7 +122,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "coordinator_runs" (
+      CREATE TABLE IF NOT EXISTS "coordinator_runs" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "interactionId" uuid NOT NULL,
         "status" character varying(32) NOT NULL,
@@ -135,7 +135,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "coordinator_proposals" (
+      CREATE TABLE IF NOT EXISTS "coordinator_proposals" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "runId" uuid NOT NULL,
         "interactionId" uuid NOT NULL,
@@ -149,7 +149,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "coordinator_trace_events" (
+      CREATE TABLE IF NOT EXISTS "coordinator_trace_events" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "runId" uuid NOT NULL,
         "eventType" character varying(16) NOT NULL,
@@ -161,7 +161,7 @@ export class InitialSchema1730000000001 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "care_context_chunks" (
+      CREATE TABLE IF NOT EXISTS "care_context_chunks" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "programId" character varying(64) NOT NULL,
         "policyKey" character varying(64) NOT NULL,
