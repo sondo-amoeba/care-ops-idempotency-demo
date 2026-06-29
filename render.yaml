@@ -1,5 +1,9 @@
-# Render Blueprint — $0 free tier API (Docker)
+# Render Blueprint — $0 free tier API (native Node runtime).
 # https://render.com/docs/blueprint-spec
+#
+# This MATCHES the live `care-ops-api` service: a native Node web service that
+# builds with npm and starts the compiled dist. (The repo's apps/api/Dockerfile
+# is for local `docker compose up` only — Render does NOT use it.)
 #
 # After connect: set DATABASE_URL (Neon) and REDIS_URL (Upstash) in the dashboard.
 # Then set API_PROXY_URL on Vercel to the Render service URL.
@@ -7,18 +11,27 @@
 services:
   - type: web
     name: care-ops-api
-    runtime: docker
+    runtime: node
     rootDir: apps/api
-    dockerfilePath: ./Dockerfile
     plan: free
-    healthCheckPath: /care-ops/interactions
+    branch: main
+    autoDeploy: true
+    # rootDir is apps/api, where only its package.json lives (the pnpm workspace
+    # lockfile is at the repo root and out of this build context), so we install
+    # standalone with npm rather than pnpm --frozen-lockfile.
+    buildCommand: npm install && npm run build
+    startCommand: node dist/main.js
+    # No healthCheckPath: Render uses port-scan detection. The app must bind a
+    # port on boot — a failed migration (see ADR-0007) prevents that and the
+    # deploy fails with "no open ports detected".
     envVars:
       - key: API_PORT
         value: "3001"
       - key: NODE_ENV
         value: production
-      # ADR-0006 relay. Off keeps the hosted demo's "Drain outbox relay" button
-      # meaningful (reviewer drives each step). Set "true" to autodrain instead.
+      # ADR-0006 relay autodrain is opt-in (default off) so the hosted demo's
+      # manual "Drain outbox relay" step is meaningful. Set "true" for a
+      # hands-off background relay.
       - key: OUTBOX_RELAY_AUTODRAIN
         value: "false"
       - key: DATABASE_URL

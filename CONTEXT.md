@@ -72,6 +72,8 @@ The worker that drains the **Outbox** out-of-band and is the **sole caller of th
 
 The request path (`sendOutbound`) is **write-only**: it claims the ledger (`pending`) and returns. Carrier submission is the relay's job, never the request's.
 
+**Autodrain is opt-in (default off).** In the lab the relay is driven explicitly — the **Drain outbox relay** step is part of the walkthrough so a reviewer watches a row go `pending → submitting → queued`. `OUTBOX_RELAY_AUTODRAIN=true` enables the background poll loop for a hands-off deployment; always off under tests.
+
 _Roadmap:_ `LISTEN/NOTIFY` on ledger insert wakes the relay on demand; the poll loop remains the durable fallback so a dropped notification never strands a row.
 
 _Avoid_: "outbox queue", "job worker" — it is a **relay** draining a ledger, not a queue consumer.
