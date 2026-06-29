@@ -73,10 +73,15 @@ export class RelayService implements OnModuleInit, OnModuleDestroy {
     if (this.reapTimer) clearInterval(this.reapTimer);
   }
 
+  /**
+   * Opt-in (default OFF). In the lab the relay is driven explicitly — the
+   * "Drain outbox relay" step is part of the walkthrough, so a reviewer can
+   * watch a row go pending → submitting → queued. Set OUTBOX_RELAY_AUTODRAIN=true
+   * for a hands-off background relay in a real deployment. Always off under tests.
+   */
   private autodrainEnabled(): boolean {
-    if (process.env.OUTBOX_RELAY_AUTODRAIN === "false") return false;
     if (process.env.VITEST || process.env.NODE_ENV === "test") return false;
-    return true;
+    return process.env.OUTBOX_RELAY_AUTODRAIN === "true";
   }
 
   /** Reentrancy guard for the background loop — never overlap drains. */
