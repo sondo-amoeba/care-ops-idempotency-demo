@@ -9,7 +9,6 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import {
   buildIdempotencyKey,
-  fakeTwilioSid,
   hourWindowStart,
   localPendingSid,
 } from "../common/idempotency.util";
@@ -153,25 +152,9 @@ export class SmsService {
       return this.buildDuplicateSendResult(idempotencyKey, racedOutbox);
     }
 
-    const carrier = await this.submitToCarrier({ idempotencyKey, body: input.body });
-    if (!carrier.ok) {
-      await this.markSubmissionFailed(idempotencyKey, carrier.reason);
-      const outbox = await this.outboxRepo.findOneOrFail({
-        where: { idempotencyKey },
-      });
-      const message = await this.messageRepo.findOne({
-        where: { idempotencyKey },
-      });
-      return {
-        duplicate: false,
-        outbox,
-        message,
-        idempotencyKey,
-        carrierSubmitted: false,
-      };
-    }
-
-    await this.markSubmitted(idempotencyKey, carrier.messageSid);
+    // ADR-0006: the request path is write-only. The ledger row is durable and
+    // `pending`; the OutboxRelay is the sole caller of the carrier and drains
+    // it out-of-band. We do NOT submit inline here.
     const outbox = await this.outboxRepo.findOneOrFail({
       where: { idempotencyKey },
     });
@@ -184,7 +167,7 @@ export class SmsService {
       outbox,
       message,
       idempotencyKey,
-      carrierSubmitted: true,
+      carrierSubmitted: false,
     };
   }
 
@@ -239,41 +222,6 @@ export class SmsService {
 
       return true;
     });
-  }
-
-  private async submitToCarrier(input: {
-    idempotencyKey: string;
-    body: string;
-  }): Promise<{ ok: true; messageSid: string } | { ok: false; reason: string }> {
-    if (process.env.SMS_SIMULATE_SUBMISSION_FAILURE === "true") {
-      return { ok: false, reason: "simulated_carrier_failure" };
-    }
-
-    void input.body;
-    return {
-      ok: true,
-      messageSid: fakeTwilioSid("out", input.idempotencyKey),
-    };
-  }
-
-  private async markSubmitted(idempotencyKey: string, twilioMessageSid: string) {
-    await this.outboxRepo.update(
-      { idempotencyKey },
-      { status: "submitted", twilioMessageSid },
-    );
-    await this.messageRepo.update(
-      { idempotencyKey },
-      { status: "queued", twilioMessageSid },
-    );
-  }
-
-  private async markSubmissionFailed(idempotencyKey: string, reason: string) {
-    await this.outboxRepo.update({ idempotencyKey }, { status: "submission_failed" });
-    await this.messageRepo.update(
-      { idempotencyKey },
-      { status: "submission_failed" },
-    );
-    void reason;
   }
 
   private async buildDuplicateSendResult(

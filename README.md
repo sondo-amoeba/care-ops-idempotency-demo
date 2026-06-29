@@ -20,7 +20,8 @@ Production code was private. This repo shows the **invariants and architecture**
 |------------|-----------------|
 | **Unified thread model** | `interaction_id` links care thread, voice session, booking, and SMS messages |
 | **Inbound idempotency** | Twilio webhook upsert on `twilio_message_sid` (UNIQUE) — replays return `duplicate: true` |
-| **Outbound idempotency** | SHA256 key over interaction + template + hour window (+ optional `resendKey`); transactional outbox + message `pending`, then carrier submit |
+| **Outbound idempotency** | SHA256 key over interaction + template + hour window (+ optional `resendKey`); write-only request path claims a transactional outbox + message `pending` |
+| **Async outbox relay** | Sole carrier caller (ADR-0006): `FOR UPDATE SKIP LOCKED` drain, backoff retry, dead-letter, reaper for stranded `submitting` rows, carrier-MPS token bucket — **Drain outbox relay** in UI + shell + Vitest |
 | **Status callbacks** | Update-only — no new rows on late delivery events; **Simulate delivery callback** in UI |
 | **Eligibility gates** | `canContact()` before outbound send; scheduling rule gates inbound YES → confirm |
 | **Inbound orchestration** | Patient replies YES → booking confirmed, voice completed, thread resolved |
@@ -43,16 +44,18 @@ Browser
        ↓
   PostgreSQL (Neon) + pgvector          Redis (Upstash)
        │                                        │
-  interactions · sms_outbox · coordinator_*    rate limits
+  interactions · sms_outbox · coordinator_*    rate limits · carrier MPS bucket
   care_context_chunks · LangGraph checkpoints
+       ↑ relay drains (FOR UPDATE SKIP LOCKED), sole carrier caller
 ```
 
 **Inbound path:** `POST /webhooks/twilio/inbound` → SID upsert → supervisor → inbound router (intent)  
-**Outbound path:** eligibility → rate limit → transactional outbox + message (`pending`) → carrier submit → `submitted`/`submission_failed`
-**Coordinator path:** LangGraph observe → RAG → plan → propose → **HITL approve** → idempotent execute  
+**Outbound write path (request):** eligibility → rate limit → transactional outbox + message (`pending`) → return  
+**Outbound delivery path (relay, ADR-0006):** `SKIP LOCKED` claim → `submitting` → MPS gate → carrier → `submitted`/retry/`dead_letter`; reaper recovers stranded rows  
+**Coordinator path:** LangGraph observe → RAG → plan → propose → **HITL approve** → idempotent execute (write-only; relay delivers)  
 **Legacy agent path:** `POST /care-ops/agent-workflow/trigger-sms` → same outbound module (non-LLM)
 
-See [docs/adr/](./docs/adr/) for decision records (outbox dedupe, inbound SID upsert, split-stack deploy, coordinator graph, multi-agent + RAG).
+See [docs/adr/](./docs/adr/) for decision records (outbox dedupe, inbound SID upsert, split-stack deploy, coordinator graph, multi-agent + RAG, async outbox relay).
 
 ## Guided invariant walkthrough (5 minutes)
 
@@ -123,7 +126,7 @@ pnpm test
 bash scripts/replay-storm.sh   # API must be running on :3001 for shell script
 ```
 
-Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, submission_failed + resendKey, YES confirmation orchestration, 100× agent-workflow storm, **coordinator graph + HITL + Gemini fallback**, inbound intent routing, RAG trace events, and Gemini planner unit tests (27 tests).
+Vitest covers inbound SID replay, outbound dedupe, **concurrent parallel sends**, write-only request path + resendKey, YES confirmation orchestration, 100× agent-workflow storm, **async outbox relay** (two-worker `SKIP LOCKED`, retry/backoff, dead-letter, reaper, carrier-MPS throttle), **coordinator graph + HITL + Gemini fallback**, inbound intent routing, RAG trace events, and Gemini planner unit tests (34 tests).
 
 Set `COORDINATOR_MODEL_MODE=mock` (default when no `GEMINI_API_KEY`) for deterministic CI. Optional `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) enables live Gemini planning (free tier, no card).
 
@@ -239,6 +242,20 @@ Open https://care-ops-idempotency-demo.vercel.app → **New care thread** → **
 
 Keep-warm runs automatically on `main`. Disable it in Render dashboard if you suspend the API.
 
+## Production scaling roadmap
+
+Scaling this lab is gated on the **write path** first ("dedupe first, intelligence second"). The relay is the one fully-specified pillar; the rest are sketched as design, not built.
+
+### Anchor — async outbox relay + retry/DLQ ([ADR-0006](./docs/adr/0006-async-outbox-relay.md)) — **built**
+
+The request path is now **write-only**: it claims a durable `pending` outbox row and returns. A **relay** (`SELECT … FOR UPDATE SKIP LOCKED`) is the sole carrier caller — crash-safe, carrier-latency-isolated, horizontally scalable (N workers, no double-submit), with a backoff/dead-letter state machine, a **reaper** bounding the at-least-once carrier window, and a relay-owned **carrier MPS token-bucket**. Drive it from the **Drain outbox relay** button, `scripts/replay-storm.sh`, or the relay endpoints (`POST /care-ops/relay/drain|reap`, `GET /care-ops/relay/stats`). Covered by `test/relay.spec.ts` (happy path, two-worker `SKIP LOCKED`, retry→success, terminal + max-attempt dead-letter, reaper, MPS throttle). See glossary: **Outbox relay**, **Reaper**, **At-least-once carrier boundary**, **Carrier MPS bucket**.
+
+### Roadmap (sketched, not built)
+
+- **Coordinator on a queue.** LangGraph runs execute via in-process `graph.invoke` today. Move them onto a Redis-backed job queue (BullMQ) with concurrency caps and LLM timeout/retry/backpressure. The queue is the right tool *here* — coordinator runs are jobs — even though it would be the wrong tool for the outbox drain (see ADR-0006 alternatives). The Postgres checkpointer already makes runs durable across restarts.
+- **Horizontal HA.** Make the API stateless and multi-instance: fan out **Coordinator trace** SSE over Redis pub/sub (in-process today), graceful drain on deploy. Rate limiting and checkpoints are already shared (Redis / Postgres).
+- **Compliance-as-design.** TCPA opt-out (STOP → permanent suppression), quiet-hours gating, Twilio webhook signature validation (**Trust zone: partner webhook**), PHI-at-rest encryption + audit log. Presented as design here; signature validation is the most natural one to actually implement next.
+
 ## Tradeoffs and v1 cuts
 
 - No auth, multi-tenant programs, or real Twilio signature validation (phase 3)
@@ -246,7 +263,8 @@ Keep-warm runs automatically on `main`. Disable it in Render dashboard if you su
 - Eligibility is program-level (not per-patient opt-out table)
 - NestJS monolith module layout (domain modules deferred)
 - **Schema:** TypeORM migrations on boot (`migrationsRun: true`) — no `synchronize`
-- **Outbound path:** ledger-first write contract — transactional outbox + message `pending`, simulated carrier submit, `submission_failed` + `resendKey` for explicit retry
+- **Outbound path:** ledger-first write contract — **write-only request path** claims a transactional outbox + message `pending`; the **async relay** (ADR-0006) is the sole carrier caller (simulated), with backoff retry, `dead_letter`, reaper, and a carrier-MPS bucket. Operator `resendKey` is a new intent (new key); relay retry reuses the same key
+- **Carrier boundary:** system is exactly-once; delivery to the carrier is **at-least-once** (reaper bounds the duplicate window). Carrier-side reconciliation is roadmap, not built
 - Coordinator uses **mock model** in CI and by default on Render (set `GEMINI_API_KEY` for live Gemini; `GEMINI_MODEL` optional, default `gemini-2.5-flash` with fallback chain)
 - LangGraph + pgvector require Neon Postgres with `vector` extension enabled
 - Sanitized fake Twilio SIDs — not a Twilio integration test

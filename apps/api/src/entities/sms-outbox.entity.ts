@@ -33,6 +33,20 @@ export class SmsOutbox {
   @Column({ type: "varchar", length: 32, nullable: true })
   source?: string;
 
+  /** ADR-0006 relay bookkeeping. */
+  @Column({ type: "int", default: 0 })
+  attempts!: number;
+
+  @Column({ type: "timestamptz", default: () => "now()" })
+  @Index()
+  nextAttemptAt!: Date;
+
+  @Column({ type: "text", nullable: true })
+  lastError?: string | null;
+
+  @Column({ type: "timestamptz", nullable: true })
+  claimedAt?: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

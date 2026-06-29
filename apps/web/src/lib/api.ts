@@ -100,6 +100,18 @@ export type StatusCallbackResult = {
   message?: SmsMessage;
 };
 
+/** ADR-0006 outbox relay. */
+export type RelayDrainSummary = {
+  claimed: number;
+  submitted: number;
+  retried: number;
+  deadLettered: number;
+  throttled: number;
+  stranded: number;
+};
+
+export type RelayStats = Record<string, number>;
+
 export const careOpsApi = {
   listInteractions: () => api<InteractionSummary[]>("/care-ops/interactions"),
   createInteraction: (patientId: string, programId: string) =>
@@ -125,6 +137,13 @@ export const careOpsApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  relayDrain: (interactionId: string) =>
+    api<RelayDrainSummary>("/care-ops/relay/drain", {
+      method: "POST",
+      body: JSON.stringify({ interactionIds: [interactionId] }),
+    }),
+  relayStats: (interactionId: string) =>
+    api<RelayStats>(`/care-ops/relay/stats?interactionId=${interactionId}`),
   listRules: () => api<EligibilityRule[]>("/care-ops/eligibility/rules"),
   upsertRule: (body: Omit<EligibilityRule, "id">) =>
     api("/care-ops/eligibility/rules", {

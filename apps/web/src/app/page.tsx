@@ -277,6 +277,22 @@ export default function CareAgentConsole() {
     }
   }
 
+  async function drainRelay() {
+    if (!selectedId) return;
+    setBusy(true);
+    try {
+      const summary = await careOpsApi.relayDrain(selectedId);
+      pushLog(
+        `Relay drain → claimed=${summary.claimed} submitted=${summary.submitted} retried=${summary.retried} dead=${summary.deadLettered} throttled=${summary.throttled}`,
+      );
+      await refresh();
+    } catch (err) {
+      pushLog(`Relay drain failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleRule(rule: EligibilityRule) {
     await careOpsApi.upsertRule({ ...rule, enabled: !rule.enabled });
     pushLog(`Eligibility ${rule.action} → ${!rule.enabled ? "enabled" : "disabled"}`);
@@ -487,10 +503,18 @@ export default function CareAgentConsole() {
             <button className="btn-secondary" disabled={busy || !selectedId} onClick={simulateVisitEnded}>
               Simulate visit ended
             </button>
+            <button className="btn-secondary" disabled={busy || !selectedId} onClick={drainRelay}>
+              Drain outbox relay
+            </button>
             <button className="btn-secondary" disabled={busy} onClick={simulateDelivery}>
               Simulate delivery callback
             </button>
           </div>
+          <p className="mt-2 text-xs text-slate-500">
+            The request path writes a <code>pending</code> outbox row; the relay is the sole carrier
+            caller (ADR-0006). Drain it to walk the row <code>pending → submitting → queued</code>,
+            then simulate the delivery callback to reach <code>delivered</code>.
+          </p>
         </CollapsibleSection>
 
         <CollapsibleSection
