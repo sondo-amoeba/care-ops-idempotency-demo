@@ -117,6 +117,28 @@ pnpm --filter @care-ops/web dev
 
 Open http://localhost:3000
 
+## Run locally on a Mac over Tailscale (ADR-0008)
+
+A tailnet-private personal instance: the whole stack runs on your Mac and is reachable from your own devices (phone, iPad, second laptop) over the tailnet — no public URL, no cloud free tiers. Because the browser only calls same-origin paths and Next.js proxies to the API server-side, **only the web origin (`:3000`) is exposed**; Postgres, Redis, and the API stay bound to the Mac. See [ADR-0008](./docs/adr/0008-local-tailnet-dev-instance.md) for the rationale and rejected alternatives.
+
+**Prereqs:** OrbStack (or Docker Desktop), Node + pnpm (`corepack enable`), Tailscale. In the Tailscale admin console, enable **MagicDNS** and **HTTPS Certificates**.
+
+```bash
+cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local     # API_PROXY_URL=http://localhost:3001
+bash scripts/up-mac.sh          # datastores + prod build + start api/web + tailscale serve --bg
+bash scripts/up-mac.sh --awake  # same, but caffeinate for lid-closed access
+bash scripts/up-mac.sh status   # api/web pids, docker ps, serve status
+bash scripts/up-mac.sh stop     # stop api/web (datastores + serve left running)
+bash scripts/up-mac.sh logs     # tail api + web logs
+```
+
+Then open `https://<mac>.<tailnet>.ts.net` from any device on your tailnet.
+
+- The exposed instance runs the **prod build** (`next start`) so it avoids Next 15's dev-server cross-origin check on `/_next/*` (the `Host` over Tailscale is the `*.ts.net` name, not `localhost`). When actively coding **on the Mac**, use `pnpm --filter @care-ops/web dev` at `localhost:3000` instead — HMR, no cross-origin issue.
+- The `micromamba` fallback in `start-local-services.sh` is `linux-64`-only; on the Mac use the Docker path above.
+- Coordinator stays `mock` by default (set `GEMINI_API_KEY` for live planning); no on-device LLM.
+
 ## Tests
 
 Requires Postgres + Redis (`bash scripts/start-local-services.sh`):

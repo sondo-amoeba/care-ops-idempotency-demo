@@ -10,3 +10,4 @@ coverage
 # build / runtime artifacts
 *.tsbuildinfo
 dump.rdb
+.run
